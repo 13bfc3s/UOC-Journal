@@ -398,6 +398,11 @@ impl LogView<'_> {
         let pal = self.style.palette;
         let outer = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(outer, Sense::click());
+        // A pane squeezed to almost nothing: draw nothing rather than do layout
+        // maths with negative sizes.
+        if outer.width() < SCROLLBAR_W + 24.0 || outer.height() < 6.0 {
+            return actions;
+        }
         let sb_rect = Rect::from_min_max(
             Pos2::new(outer.right() - SCROLLBAR_W, outer.top()),
             outer.right_bottom(),
@@ -584,6 +589,9 @@ impl LogView<'_> {
                 Vec2::new(content.width(), l.height),
             );
             let text = self.store.text(e);
+            if let Some(bg) = pal.channel_bg(e.channel) {
+                clip.rect_filled(row_rect, CornerRadius::ZERO, bg);
+            }
             // Whole-line highlight rules and mentions tint the row.
             let mut bar: Option<Color32> = None;
             for h in self
@@ -829,9 +837,12 @@ impl LogView<'_> {
         } else {
             (state.top as f32 / max_top as f32).clamp(0.0, 1.0)
         };
-        let thumb_h =
-            (track.height() * visible as f32 / n.max(1) as f32).clamp(24.0, track.height());
-        let travel = track.height() - thumb_h;
+        // `clamp` panics when min > max, which happens for very short panes.
+        let thumb_h = (track.height() * visible as f32 / n.max(1) as f32)
+            .max(24.0_f32.min(track.height()))
+            .min(track.height())
+            .max(0.0);
+        let travel = (track.height() - thumb_h).max(0.0);
         let thumb = Rect::from_min_size(
             Pos2::new(track.left() + 2.0, track.top() + travel * frac),
             Vec2::new(track.width() - 4.0, thumb_h),
@@ -922,12 +933,12 @@ fn pill_width(ui: &egui::Ui, font_size: f32) -> f32 {
 }
 
 fn paint_pill(painter: &egui::Painter, r: Rect, pal: &Palette, character: &str, font_size: f32) {
-    let c = pal.name_color(character);
+    let (label, c) = pal.chip(character);
     painter.rect_filled(r, CornerRadius::same(255), c.gamma_multiply(0.22));
     painter.text(
         r.center(),
         Align2::CENTER_CENTER,
-        initials(character),
+        label,
         FontId::new(font_size * 0.7, FontFamily::Proportional),
         c,
     );

@@ -212,6 +212,17 @@ impl Default for HighlightRule {
     }
 }
 
+/// How one of your characters is tagged on lines (multi-client).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CharacterChip {
+    pub name: String,
+    /// Up to three characters; empty = initials.
+    pub label: String,
+    /// Empty = colour derived from the name.
+    pub color: Option<Rgb>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -230,6 +241,7 @@ pub struct Settings {
     /// Prefix lines with the character name when more than one client is logged.
     pub character_tags: bool,
     pub always_on_top: bool,
+    pub chips: Vec<CharacterChip>,
     pub highlights: Vec<HighlightRule>,
     pub rules: Vec<UserRule>,
     pub panes: Vec<PaneConfig>,
@@ -254,6 +266,7 @@ impl Default for Settings {
             color_names: true,
             character_tags: true,
             always_on_top: false,
+            chips: Vec::new(),
             highlights: vec![
                 HighlightRule {
                     pattern: r"\b\d*\s*(reds?|pks?|gankers?|murderers?)\b".into(),

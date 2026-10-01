@@ -16,8 +16,9 @@ pub enum Tab {
     #[default]
     Journal,
     Appearance,
+    Characters,
+    Channels,
     Highlights,
-    Rules,
 }
 
 #[derive(Default)]
@@ -46,8 +47,9 @@ pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
                 let t = &mut app.settings_ui.tab;
                 ui.selectable_value(t, Tab::Journal, "Journal");
                 ui.selectable_value(t, Tab::Appearance, "Appearance");
+                ui.selectable_value(t, Tab::Characters, "Characters");
+                ui.selectable_value(t, Tab::Channels, "Channels & rules");
                 ui.selectable_value(t, Tab::Highlights, "Highlights & alerts");
-                ui.selectable_value(t, Tab::Rules, "Classification rules");
             });
             ui.separator();
             egui::ScrollArea::vertical()
@@ -55,8 +57,9 @@ pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
                 .show(ui, |ui| match app.settings_ui.tab {
                     Tab::Journal => journal_tab(app, ui),
                     Tab::Appearance => appearance_tab(app, ui),
+                    Tab::Characters => characters_tab(app, ui),
+                    Tab::Channels => channels_tab(app, ui),
                     Tab::Highlights => highlights_tab(app, ui),
-                    Tab::Rules => rules_tab(app, ui),
                 });
         });
     if !open {
@@ -301,13 +304,6 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
             cell(ui, "Damage dealt", &mut theme.damage_dealt, &mut n);
             cell(ui, "Healing", &mut theme.heal, &mut n);
             cell(ui, "Names", &mut theme.name_color, &mut n);
-            for c in Channel::ALL {
-                let col = theme
-                    .channels
-                    .entry(c.label().to_string())
-                    .or_insert(theme.text);
-                cell(ui, c.label(), col, &mut n);
-            }
             if !n.is_multiple_of(2) {
                 ui.end_row();
             }
@@ -316,14 +312,12 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
         ui.label("Dark theme");
         ui.checkbox(&mut theme.dark, "");
     });
-    if theme != before {
-        let is_preset = crate::theme::presets().iter().any(|p| p.name == theme.name);
-        if is_preset {
-            theme.name = format!("{} (custom)", theme.name);
-        }
-        app.settings.custom_themes.retain(|t| t.name != theme.name);
-        app.settings.theme = theme.name.clone();
-        app.settings.custom_themes.push(theme.clone());
+    ui.label(
+        RichText::new("Channel colours and row backgrounds are on the “Channels & rules” page.")
+            .small(),
+    );
+    if commit_theme(app, &before, theme.clone()) {
+        theme = app.settings.current_theme();
         restyle = true;
     }
 
@@ -480,10 +474,65 @@ fn highlights_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
     }
 }
 
-fn rules_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
+/// Apply an edited copy of the current theme; editing a built-in theme saves a
+/// custom copy instead. Returns true if anything changed.
+fn commit_theme(app: &mut JournalApp, before: &Theme, mut theme: Theme) -> bool {
+    if theme == *before {
+        return false;
+    }
+    if crate::theme::presets().iter().any(|p| p.name == theme.name) {
+        theme.name = format!("{} (custom)", theme.name);
+    }
+    app.settings.custom_themes.retain(|t| t.name != theme.name);
+    app.settings.theme = theme.name.clone();
+    app.settings.custom_themes.push(theme);
+    true
+}
+
+fn rule_editor(ui: &mut egui::Ui, r: &mut UserRule, key: usize) -> bool {
+    let mut remove = false;
+    ui.push_id(("rule", key), |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(&mut r.enabled, "").on_hover_text("enabled");
+            ui.label("speaker");
+            ui.add(
+                egui::TextEdit::singleline(&mut r.speaker)
+                    .desired_width(100.0)
+                    .hint_text("any"),
+            );
+            ui.label("from");
+            channel_set_menu(ui, ("from", key), &mut r.from, "any channel");
+            ui.label("text matches");
+            ui.add(
+                egui::TextEdit::singleline(&mut r.pattern)
+                    .desired_width(180.0)
+                    .hint_text("regex, e.g. (?i)revealed"),
+            );
+            egui::ComboBox::from_id_salt(("to", key))
+                .selected_text(format!("→ {}", r.to.label()))
+                .show_ui(ui, |ui| {
+                    for c in Channel::ALL {
+                        ui.selectable_value(&mut r.to, c, c.label());
+                    }
+                });
+            if ui.small_button("🗑").on_hover_text("remove rule").clicked() {
+                remove = true;
+            }
+        });
+        if !r.pattern.is_empty() {
+            if let Err(e) = regex::Regex::new(&r.pattern) {
+                ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e.to_string());
+            }
+        }
+    });
+    remove
+}
+
+fn channels_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
     ui.label(
-        "Rules move lines into another channel after the built-in classification. They are tried in \
-         order; the first match wins. Example: speaker “System”, pattern “(?i)you have been revealed” → Combat.",
+        "Every line lands in one channel. Here you can colour each channel, give its lines a \
+         background, and add regular-expression rules that move matching lines into it. Rules \
+         run after the built-in sorting, in list order, and the first match wins.",
     );
     ui.add_space(6.0);
     let mut draft = app
@@ -491,74 +540,13 @@ fn rules_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
         .rules_draft
         .take()
         .unwrap_or_else(|| app.settings.rules.clone());
-    let mut remove = None;
-    let mut swap = None;
-    let n = draft.len();
-    for (i, r) in draft.iter_mut().enumerate() {
-        ui.push_id(("rule", i), |ui| {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut r.enabled, "");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut r.name)
-                            .desired_width(140.0)
-                            .hint_text("name"),
-                    );
-                    if i > 0 && ui.small_button("⏶").clicked() {
-                        swap = Some((i, i - 1));
-                    }
-                    if i + 1 < n && ui.small_button("⏷").clicked() {
-                        swap = Some((i, i + 1));
-                    }
-                    if ui.small_button("🗑").clicked() {
-                        remove = Some(i);
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("speaker");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut r.speaker)
-                            .desired_width(110.0)
-                            .hint_text("any"),
-                    );
-                    ui.label("in");
-                    channel_set_menu(ui, ("from", i), &mut r.from, "any channel");
-                    ui.label("text matches");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut r.pattern)
-                            .desired_width(170.0)
-                            .hint_text("regex"),
-                    );
-                    ui.label("→");
-                    egui::ComboBox::from_id_salt(("to", i))
-                        .selected_text(r.to.label())
-                        .show_ui(ui, |ui| {
-                            for c in Channel::ALL {
-                                ui.selectable_value(&mut r.to, c, c.label());
-                            }
-                        });
-                });
-                if let Err(e) = regex::Regex::new(&r.pattern) {
-                    if !r.pattern.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e.to_string());
-                    }
-                }
-            });
-        });
-    }
-    if let Some(i) = remove {
-        draft.remove(i);
-    }
-    if let Some((a, b)) = swap {
-        draft.swap(a, b);
-    }
+    let rules_changed = draft != app.settings.rules;
     ui.horizontal(|ui| {
-        if ui.button("+ Add rule").clicked() {
-            draft.push(UserRule::default());
-        }
-        let changed = draft != app.settings.rules;
         if ui
-            .add_enabled(changed, egui::Button::new("Apply (re-reads the journal)"))
+            .add_enabled(
+                rules_changed,
+                egui::Button::new("Apply rules (re-reads the journal)"),
+            )
             .clicked()
         {
             app.settings.rules = draft.clone();
@@ -566,12 +554,95 @@ fn rules_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
             app.mark_dirty();
         }
         if ui
-            .add_enabled(changed, egui::Button::new("Revert"))
+            .add_enabled(rules_changed, egui::Button::new("Revert"))
             .clicked()
         {
             draft = app.settings.rules.clone();
         }
+        if rules_changed {
+            ui.label(
+                RichText::new("unapplied rule changes")
+                    .color(app.palette.accent)
+                    .small(),
+            );
+        }
     });
+    ui.add_space(6.0);
+
+    let mut theme = app.settings.current_theme();
+    let before = theme.clone();
+    let mut remove: Option<usize> = None;
+    for c in Channel::ALL {
+        let label = c.label().to_string();
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let fg = theme.channels.get(&label).copied().unwrap_or(theme.text);
+                let bg = theme.channel_backgrounds.get(&label).copied();
+                let mut sample = RichText::new(format!(" {label} "))
+                    .color(fg.color())
+                    .strong();
+                sample = sample.background_color(bg.unwrap_or(theme.background).color());
+                ui.add_sized([90.0, 20.0], egui::Label::new(sample));
+                ui.label("text");
+                let mut fg_edit = fg;
+                if ui.color_edit_button_srgb(&mut fg_edit.0).changed() {
+                    theme.channels.insert(label.clone(), fg_edit);
+                }
+                let mut has_bg = bg.is_some();
+                if ui.checkbox(&mut has_bg, "background").changed() {
+                    if has_bg {
+                        let tint = crate::theme::blend(theme.background.color(), fg.color(), 0.16);
+                        theme
+                            .channel_backgrounds
+                            .insert(label.clone(), Rgb::from_color(tint));
+                    } else {
+                        theme.channel_backgrounds.remove(&label);
+                    }
+                }
+                if let Some(mut b) = theme.channel_backgrounds.get(&label).copied() {
+                    if ui.color_edit_button_srgb(&mut b.0).changed() {
+                        theme.channel_backgrounds.insert(label.clone(), b);
+                    }
+                }
+                ui.label(RichText::new(c.description()).small().weak());
+            });
+            let mine: Vec<usize> = (0..draft.len()).filter(|&i| draft[i].to == c).collect();
+            let header = if mine.is_empty() {
+                "Rules: none".to_string()
+            } else {
+                format!("Rules: {}", mine.len())
+            };
+            egui::CollapsingHeader::new(header)
+                .id_salt(("rules", c.index()))
+                .default_open(!mine.is_empty())
+                .show(ui, |ui| {
+                    for i in mine {
+                        if rule_editor(ui, &mut draft[i], i) {
+                            remove = Some(i);
+                        }
+                    }
+                    if ui
+                        .small_button(format!("+ Add rule into {label}"))
+                        .clicked()
+                    {
+                        draft.push(UserRule {
+                            name: format!("{label} rule"),
+                            to: c,
+                            ..Default::default()
+                        });
+                    }
+                });
+        });
+    }
+    if let Some(i) = remove {
+        draft.remove(i);
+    }
+    if commit_theme(app, &before, theme) {
+        let ctx = ui.ctx().clone();
+        app.apply_style(&ctx);
+        app.mark_dirty();
+    }
 
     ui.add_space(10.0);
     ui.separator();
@@ -632,4 +703,89 @@ fn rules_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
         });
     }
     app.settings_ui.rules_draft = Some(draft);
+}
+
+fn characters_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
+    ui.label(
+        "When more than one client is running, each line is tagged with a chip for the character \
+         whose journal it came from. Give each character up to three letters and a colour.",
+    );
+    let mut changed = ui
+        .checkbox(
+            &mut app.settings.character_tags,
+            "Show character chips (with two or more characters)",
+        )
+        .changed();
+    ui.add_space(6.0);
+    let mut names: Vec<String> = app.store.characters();
+    for c in &app.settings.chips {
+        if !names.contains(&c.name) {
+            names.push(c.name.clone());
+        }
+    }
+    if names.is_empty() {
+        ui.label(
+            RichText::new(
+                "No characters seen yet. Log in with journal saving on and they appear here.",
+            )
+            .weak(),
+        );
+    }
+    let mut remove: Option<String> = None;
+    egui::Grid::new("chips")
+        .num_columns(5)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            ui.label(RichText::new("Chip").strong());
+            ui.label(RichText::new("Character").strong());
+            ui.label(RichText::new("Letters").strong());
+            ui.label(RichText::new("Colour").strong());
+            ui.label("");
+            ui.end_row();
+            for name in &names {
+                let idx = match app.settings.chips.iter().position(|c| &c.name == name) {
+                    Some(i) => i,
+                    None => {
+                        app.settings.chips.push(crate::config::CharacterChip {
+                            name: name.clone(),
+                            ..Default::default()
+                        });
+                        app.settings.chips.len() - 1
+                    }
+                };
+                crate::logview::character_pill(ui, &app.palette, name);
+                ui.label(name);
+                let chip = &mut app.settings.chips[idx];
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut chip.label)
+                        .char_limit(3)
+                        .desired_width(44.0)
+                        .hint_text(crate::logview::initials(name)),
+                );
+                changed |= r.changed();
+                ui.horizontal(|ui| {
+                    let mut custom = chip.color.is_some();
+                    if ui.checkbox(&mut custom, "custom").changed() {
+                        chip.color = custom.then(|| Rgb::from_color(app.palette.name_color(name)));
+                        changed = true;
+                    }
+                    if let Some(c) = chip.color.as_mut() {
+                        changed |= ui.color_edit_button_srgb(&mut c.0).changed();
+                    }
+                });
+                if !app.store.characters().contains(name) && ui.small_button("forget").clicked() {
+                    remove = Some(name.clone());
+                }
+                ui.end_row();
+            }
+        });
+    if let Some(n) = remove {
+        app.settings.chips.retain(|c| c.name != n);
+        changed = true;
+    }
+    if changed {
+        let ctx = ui.ctx().clone();
+        app.apply_style(&ctx);
+        app.mark_dirty();
+    }
 }

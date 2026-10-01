@@ -269,7 +269,7 @@ impl Pane {
                         .small(),
                 )
                 .on_hover_text("lines shown in this pane");
-                let w = ui.available_width();
+                let w = ui.available_width().max(10.0);
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     changed_search |= self.search_box(
                         ui,
@@ -614,7 +614,7 @@ impl Pane {
                         .color(pal.dim)
                         .small(),
                 );
-                let w = ui.available_width();
+                let w = ui.available_width().max(10.0);
                 self.search_box(ui, pal, "Find name or guild…", w);
             });
         });
@@ -670,7 +670,7 @@ impl Pane {
         let row_h = font.size + 6.0;
         let width = ui.available_width();
         let cols = [0.30f32, 0.11, 0.29, 0.10, 0.10, 0.10];
-        let col_w: Vec<f32> = cols.iter().map(|f| (width - 16.0) * f).collect();
+        let col_w: Vec<f32> = cols.iter().map(|f| ((width - 16.0) * f).max(1.0)).collect();
 
         // Header
         ui.horizontal(|ui| {

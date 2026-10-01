@@ -105,6 +105,14 @@ impl JournalApp {
                 app.settings_ui.open = true;
                 app.settings_ui.tab = crate::settings_ui::Tab::Appearance;
             }
+            Ok("channels") => {
+                app.settings_ui.open = true;
+                app.settings_ui.tab = crate::settings_ui::Tab::Channels;
+            }
+            Ok("characters") => {
+                app.settings_ui.open = true;
+                app.settings_ui.tab = crate::settings_ui::Tab::Characters;
+            }
             Ok("help") => app.show_help = true,
             Ok("welcome") => app.show_welcome = true,
             _ => {}
@@ -173,6 +181,19 @@ impl JournalApp {
 
     pub fn apply_style(&mut self, ctx: &egui::Context) {
         self.palette = Palette::from_theme(&self.settings.current_theme());
+        for chip in &self.settings.chips {
+            let label: String = chip.label.trim().chars().take(3).collect();
+            let label = if label.is_empty() {
+                crate::logview::initials(&chip.name)
+            } else {
+                label
+            };
+            let color = chip
+                .color
+                .map(|c| c.color())
+                .unwrap_or_else(|| self.palette.name_color(&chip.name));
+            self.palette.chips.insert(chip.name.clone(), (label, color));
+        }
         let visuals = self.palette.visuals();
         ctx.set_visuals_of(egui::Theme::Dark, visuals.clone());
         ctx.set_visuals_of(egui::Theme::Light, visuals);
@@ -505,12 +526,26 @@ impl JournalApp {
             });
             ui.menu_button("Theme", |ui| {
                 let mut pick = None;
-                for t in self.settings.all_themes() {
-                    let sel = t.name == self.settings.theme;
-                    if ui.radio(sel, &t.name).clicked() {
-                        pick = Some(t.name.clone());
-                    }
+                let themes = self.settings.all_themes();
+                for (title, dark) in [("Dark themes", true), ("Light themes", false)] {
+                    ui.menu_button(title, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(480.0)
+                            .show(ui, |ui| {
+                                for t in themes.iter().filter(|t| t.dark == dark) {
+                                    let sel = t.name == self.settings.theme;
+                                    if ui.radio(sel, &t.name).clicked() {
+                                        pick = Some(t.name.clone());
+                                    }
+                                }
+                            });
+                    });
                 }
+                ui.label(
+                    RichText::new(format!("Current: {}", self.settings.theme))
+                        .small()
+                        .weak(),
+                );
                 ui.separator();
                 if ui.button("Edit colours…").clicked() {
                     ui.close();

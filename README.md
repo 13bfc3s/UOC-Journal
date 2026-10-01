@@ -59,13 +59,9 @@ panes side by side.
   or marks the window urgent when a match arrives while it is in the
   background. The default rule highlights reds and PKs in guild and alliance
   chat.
-- **Themes.** Midnight, Daylight, Britannia, Classic UO, Nord and High
-  Contrast are built in. A colour editor lets you change every colour,
-  including per-channel ones. You can also set the font size, load a custom
-  font file, use monospace, colour each name differently, and import or
-  export themes as TOML.
-- **Custom rules.** Regex rules can move lines between channels, and a test
-  box shows you how a line will be classified.
+- **Themes.** 45 built in. They include Midnight, Daylight, Britannia, Classic UO, High Contrast, and popular editor palettes (Dracula, Solarized, Gruvbox, Monokai, One Dark, Tokyo Night, Catppuccin, Everforest, Rosé Pine, Kanagawa, Nord, …). There are also UO-flavoured themes like Moonglow, Blood Moon, Virtue and Parchment, and retro terminals. A colour editor lets you change every colour. You can also set the font size, load a custom font file, use monospace, colour each name differently, and import or export themes as TOML.
+- **Character chips.** With several clients, each line carries a chip for its character. On the Characters page you set up to three letters and a colour for each one.
+- **Channels page.** For each channel you can set its text colour, an optional row background, and its own regex rules for moving matching lines into it. A test box shows where a pasted line lands.
 - Copying, exporting, selecting lines (Shift+click), a context menu on every
   line, and keyboard navigation.
 
