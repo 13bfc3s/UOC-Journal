@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=UOC Journal
+GenericName=Ultima Online journal viewer
+Comment=Fast, searchable journal for ClassicUO / Outlands
+Exec=uoc-journal
+Icon=uoc-journal
+Terminal=false
+Categories=Game;Utility;
+Keywords=UO;Ultima;Outlands;ClassicUO;journal;chat;log;
+StartupWMClass=uoc-journal

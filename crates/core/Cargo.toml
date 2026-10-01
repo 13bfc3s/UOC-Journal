@@ -1,0 +1,12 @@
+[package]
+name = "uoj-core"
+description = "Journal parsing, classification, storage and filtering for UOC Journal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+regex.workspace = true
+memchr.workspace = true
+rustc-hash.workspace = true

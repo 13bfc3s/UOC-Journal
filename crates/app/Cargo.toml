@@ -1,0 +1,22 @@
+[package]
+name = "uoc-journal"
+description = "A fast, searchable, themeable journal viewer for ClassicUO / Ultima Online Outlands on Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "uoc-journal"
+path = "src/main.rs"
+
+[dependencies]
+uoj-core.workspace = true
+serde.workspace = true
+rustc-hash.workspace = true
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "persistence"] }
+egui_dock = { version = "0.21", features = ["serde"] }
+toml = "1"
+regex.workspace = true
+serde_json = "1"
+rfd = "0.17"
+directories = "6"

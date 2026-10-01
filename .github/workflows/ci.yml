@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  linux-release:
+    needs: test
+    runs-on: ubuntu-22.04 # older glibc = runs on more distros
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release -p uoc-journal
+      - name: Package
+        run: |
+          set -eux
+          VERSION="${GITHUB_REF_NAME//\//-}"
+          DIR="uoc-journal-${VERSION}-linux-x86_64"
+          mkdir -p "$DIR"
+          cp target/release/uoc-journal "$DIR/"
+          cp README.md LICENSE "$DIR/"
+          cp packaging/uoc-journal.desktop packaging/uoc-journal.png packaging/install.sh "$DIR/"
+          chmod +x "$DIR/install.sh"
+          tar czf "$DIR.tar.gz" "$DIR"
+          echo "ARCHIVE=$DIR.tar.gz" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uoc-journal-linux-x86_64
+          path: ${{ env.ARCHIVE }}
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARCHIVE }}
