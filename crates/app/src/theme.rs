@@ -106,7 +106,23 @@ fn channel_map(colors: [(Channel, u32); Channel::COUNT]) -> BTreeMap<String, Rgb
 pub fn presets() -> Vec<Theme> {
     let mut v = handmade();
     v.extend(GENERATED.iter().map(build));
+    // Row backgrounds are on by default: a light tint of each channel's colour.
+    for t in &mut v {
+        for c in Channel::ALL {
+            let fg = t.channels.get(c.label()).copied().unwrap_or(t.text);
+            let tint = default_background(t, fg);
+            t.channel_backgrounds
+                .entry(c.label().to_string())
+                .or_insert(tint);
+        }
+    }
     v
+}
+
+/// The tint used when a channel's background is switched on.
+pub fn default_background(t: &Theme, fg: Rgb) -> Rgb {
+    let strength = if t.dark { 0.11 } else { 0.09 };
+    Rgb::from_color(blend(t.background.color(), fg.color(), strength))
 }
 
 fn handmade() -> Vec<Theme> {

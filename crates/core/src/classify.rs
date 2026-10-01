@@ -318,6 +318,10 @@ pub struct Classifier {
     combat: RegexSet,
     /// `Kal Ort Por [Recall]` (ClassicUO's "{power} [{spell}]" spell format).
     spell_fmt: Regex,
+    /// `all follow me`, `all kill`, ... (prefix checked separately for pet names).
+    pet_cmd: Regex,
+    /// Aspect experience gains.
+    aspect_xp: Regex,
     spells: FxHashMap<String, &'static str>,
     /// System messages repeat a lot (targeting prompts, crafting results, …);
     /// remember their channel instead of re-running the sets.
@@ -339,6 +343,12 @@ impl Classifier {
             world: RegexSet::new(WORLD_PATTERNS).expect("world patterns"),
             skill: RegexSet::new(SKILL_PATTERNS).expect("skill patterns"),
             combat: RegexSet::new(COMBAT_PATTERNS).expect("combat patterns"),
+            pet_cmd: Regex::new(
+                r"(?i)^(.+?) (kill|attack|guard|guard me|follow|follow me|come|stay|stop|patrol|fetch|get|drop|friend|transfer|release|go)$",
+            )
+            .expect("pet command"),
+            aspect_xp: Regex::new(r"(?i)\baspect\b.*\b(xp|exp|experience)\b|\b(xp|exp|experience)\b.*\baspect\b")
+                .expect("aspect xp"),
             spell_fmt: Regex::new(r"^(?:[A-Z][a-z]+ ){0,5}[A-Z][a-z]+ \[[A-Z][A-Za-z' ]{1,30}\]$")
                 .expect("spell fmt"),
             spells: SPELLS
@@ -428,7 +438,10 @@ impl Classifier {
 
         match name {
             "System" => {
-                if let Some(n) = combat_number(text) {
+                if self.aspect_xp.is_match(text) && !text.contains(" has completed the achievement")
+                {
+                    out.channel = Channel::System;
+                } else if let Some(n) = combat_number(text) {
                     out.channel = Channel::Combat;
                     out.amount = Some(n);
                     out.flags |= flags::INCOMING;
@@ -457,6 +470,13 @@ impl Classifier {
             out.flags |= flags::SELF;
         }
 
+        // --- Aspect experience over yourself -> personal system message --------
+        if is_self && self.aspect_xp.is_match(text) {
+            out.channel = Channel::System;
+            out.flags &= !flags::SELF;
+            return out;
+        }
+
         // --- Damage / heal numbers over a mobile ------------------------------
         if let Some(n) = combat_number(text) {
             out.channel = Channel::Combat;
@@ -480,6 +500,15 @@ impl Classifier {
                 out.label = None;
             }
             return out;
+        }
+
+        // --- Pet commands: `all follow me`, `<pet> kill` ---------------------------
+        if let Some(m) = self.pet_cmd.captures(text) {
+            let target = m.get(1).map(|g| g.as_str()).unwrap_or("");
+            if target.eq_ignore_ascii_case("all") || (ctx.is_pet)(target) {
+                out.channel = Channel::Combat;
+                return out;
+            }
         }
 
         // --- Spells -------------------------------------------------------------
@@ -757,6 +786,23 @@ mod tests {
         assert_eq!(c("Lysa Quill", "*waves*").0, Channel::Emote);
         assert_eq!(c("Lysa Quill", "good hunting").0, Channel::Speech);
         assert_eq!(c("Garrick", "Fine hides, cheap!").0, Channel::Npc);
+        assert_eq!(c("Aldric Thorne", "All Follow Me").0, Channel::Combat);
+        assert_eq!(c("Aldric Thorne", "all kill").0, Channel::Combat);
+        assert_eq!(c("Aldric Thorne", "Smudge guard me").0, Channel::Combat);
+        assert_eq!(c("Lysa Quill", "please stop").0, Channel::Speech);
+        assert_eq!(
+            c("System", "You gained 15 aspect experience.").0,
+            Channel::System
+        );
+        assert_eq!(c("Aldric Thorne", "+40 Aspect XP").0, Channel::System);
+        assert_eq!(
+            c(
+                "System",
+                "Corwen Ash has completed the achievement: Aspect Mastery (Basic)."
+            )
+            .0,
+            Channel::World
+        );
         let (ch, _, fl) = c("Aldric Thorne", "bank");
         assert_eq!(ch, Channel::Speech);
         assert!(fl & flags::SELF != 0);

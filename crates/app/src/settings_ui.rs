@@ -592,10 +592,8 @@ fn channels_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                 let mut has_bg = bg.is_some();
                 if ui.checkbox(&mut has_bg, "background").changed() {
                     if has_bg {
-                        let tint = crate::theme::blend(theme.background.color(), fg.color(), 0.16);
-                        theme
-                            .channel_backgrounds
-                            .insert(label.clone(), Rgb::from_color(tint));
+                        let tint = crate::theme::default_background(&theme, fg);
+                        theme.channel_backgrounds.insert(label.clone(), tint);
                     } else {
                         theme.channel_backgrounds.remove(&label);
                     }

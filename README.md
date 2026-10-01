@@ -61,7 +61,7 @@ panes side by side.
   chat.
 - **Themes.** 45 built in. They include Midnight, Daylight, Britannia, Classic UO, High Contrast, and popular editor palettes (Dracula, Solarized, Gruvbox, Monokai, One Dark, Tokyo Night, Catppuccin, Everforest, Rosé Pine, Kanagawa, Nord, …). There are also UO-flavoured themes like Moonglow, Blood Moon, Virtue and Parchment, and retro terminals. A colour editor lets you change every colour. You can also set the font size, load a custom font file, use monospace, colour each name differently, and import or export themes as TOML.
 - **Character chips.** With several clients, each line carries a chip for its character. On the Characters page you set up to three letters and a colour for each one.
-- **Channels page.** For each channel you can set its text colour, an optional row background, and its own regex rules for moving matching lines into it. A test box shows where a pasted line lands.
+- **Channels page.** For each channel you can set its text colour, a row background (on by default, with a light tint), and its own regex rules for moving matching lines into it. A test box shows where a pasted line lands.
 - Copying, exporting, selecting lines (Shift+click), a context menu on every
   line, and keyboard navigation.
 
