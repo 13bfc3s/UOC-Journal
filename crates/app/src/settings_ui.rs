@@ -190,16 +190,28 @@ fn journal_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
         ui.label("files.");
     });
     ui.label(
-        RichText::new("The newest file is always followed. Journal → “Load the whole folder's history” loads everything once.")
-            .small(),
+        RichText::new(
+            "The newest file is always followed live. To read every older file in the \
+             folder once, use “Load the whole folder's history” below (also in the Journal menu).",
+        )
+        .small(),
     );
     if changed {
         app.mark_dirty();
     }
-    if ui.button("Apply & reload").clicked() {
-        app.reconfigure_watcher();
-        app.watcher.send(uoj_core::watcher::Command::Reload);
-    }
+    ui.horizontal(|ui| {
+        if ui.button("Apply & reload").clicked() {
+            app.reconfigure_watcher();
+            app.watcher.send(uoj_core::watcher::Command::Reload);
+        }
+        if ui
+            .button("Load the whole folder's history")
+            .on_hover_text("Reads every journal file in the folder once. Your history window above is not changed.")
+            .clicked()
+        {
+            app.load_all_history();
+        }
+    });
     ui.add_space(8.0);
     ui.separator();
     ui.label(RichText::new("Files").strong());
@@ -713,7 +725,7 @@ fn rule_editor(ui: &mut egui::Ui, r: &mut UserRule, key: usize) -> bool {
                     .hint_text("regex, e.g. (?i)revealed"),
             );
             egui::ComboBox::from_id_salt(("to", key))
-                .selected_text(format!("→ {}", r.to.label()))
+                .selected_text(format!("into {}", r.to.label()))
                 .show_ui(ui, |ui| {
                     for c in Channel::ALL {
                         ui.selectable_value(&mut r.to, c, c.label());

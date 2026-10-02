@@ -114,7 +114,7 @@ paste the path into the box instead.
    - Steam/Proton (`steamapps/compatdata/*/pfx`)
 
    Pick one, browse, or paste a path.
-3. Play. Journal → *Load the whole folder's history* pulls in everything older
+3. Play. *Load the whole folder's history* (Settings → Journal, or the Journal menu) pulls in everything older
    than the default 12-hour window.
 
 ### Why read the log files instead of hooking into the client?

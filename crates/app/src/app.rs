@@ -155,6 +155,12 @@ impl JournalApp {
 
     // ---- settings plumbing ------------------------------------------------------
 
+    /// Read every journal file in the folder once, ignoring the history window.
+    pub fn load_all_history(&mut self) {
+        self.clear_mark = 0;
+        self.watcher.send(Command::LoadAll);
+    }
+
     pub fn mark_dirty(&mut self) {
         self.settings_dirty = true;
         self.settings_changed_at = Instant::now();
@@ -524,8 +530,7 @@ impl JournalApp {
                 ui.separator();
                 if ui.button("Load the whole folder's history").clicked() {
                     ui.close();
-                    self.clear_mark = 0;
-                    self.watcher.send(Command::LoadAll);
+                    self.load_all_history();
                 }
                 if ui
                     .add(egui::Button::new("Reload").shortcut_text("F5"))
@@ -1069,7 +1074,7 @@ impl eframe::App for JournalApp {
                     self.compile_highlights();
                     self.mark_dirty();
                     self.notify(format!(
-                        "Highlighting “{word}” (edit in Settings → Highlights)"
+                        "Highlighting “{word}” (edit in Settings > Highlights)"
                     ));
                 }
                 PaneAction::ConfigChanged => self.mark_dirty(),
