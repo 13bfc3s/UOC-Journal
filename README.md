@@ -172,6 +172,12 @@ in `uoc-journal-layout.json` next to it. Both are plain text and safe to edit.
 To keep settings next to the program instead (portable mode), put an empty
 `portable.txt` beside the binary.
 
+If UOC Journal crashes, it appends a report to `crash.log` in the same folder
+(Help → Open settings & crash log folder). This includes crashes in the
+graphics driver or X11/Wayland: the program runs as a small watcher process
+that records how the window process ended and its last output. Set
+`UOC_JOURNAL_NO_WATCHDOG=1` to run as a single process.
+
 Example of a custom rule and highlight:
 
 ```toml

@@ -576,6 +576,7 @@ impl JournalApp {
                     ui.close();
                     self.reset_layout();
                 }
+                ui.menu_button("Theme", |ui| self.theme_menu(ui));
                 ui.separator();
                 let mut changed = false;
                 ui.label(RichText::new("Time column").small().weak());
@@ -639,54 +640,6 @@ impl JournalApp {
                     self.mark_dirty();
                 }
             });
-            ui.menu_button("Theme", |ui| {
-                let mut pick = None;
-                let mut shown = false;
-                let mut hovered: Option<String> = None;
-                let themes = self.settings.all_themes();
-                for (title, dark) in [("Dark themes", true), ("Light themes", false)] {
-                    ui.menu_button(title, |ui| {
-                        egui::ScrollArea::vertical()
-                            .max_height(480.0)
-                            .show(ui, |ui| {
-                                shown = true;
-                                for t in themes.iter().filter(|t| t.dark == dark) {
-                                    let sel = t.name == self.settings.theme;
-                                    let r = ui.radio(sel, &t.name);
-                                    if r.hovered() {
-                                        hovered = Some(t.name.clone());
-                                    }
-                                    if r.clicked() {
-                                        pick = Some(t.name.clone());
-                                    }
-                                }
-                            });
-                    });
-                }
-                ui.label(
-                    RichText::new(format!("Current: {}", self.settings.theme))
-                        .small()
-                        .weak(),
-                );
-                ui.separator();
-                if ui.button("Edit colours…").clicked() {
-                    ui.close();
-                    self.settings_ui.open = true;
-                    self.settings_ui.tab = crate::settings_ui::Tab::Appearance;
-                }
-                self.theme_list_shown |= shown;
-                if hovered.is_some() {
-                    self.theme_hovered = hovered;
-                }
-                if let Some(name) = pick {
-                    self.settings.theme = name;
-                    self.theme_preview = None;
-                    let ctx = ui.ctx().clone();
-                    self.apply_style(&ctx);
-                    self.mark_dirty();
-                    ui.close();
-                }
-            });
             if ui.button("Settings").clicked() {
                 self.settings_ui.open = !self.settings_ui.open;
             }
@@ -698,6 +651,22 @@ impl JournalApp {
                     ui.close();
                     self.show_help = true;
                 }
+                if ui
+                    .button("Open settings & crash log folder")
+                    .on_hover_text(config::config_dir().display().to_string())
+                    .clicked()
+                {
+                    ui.close();
+                    let dir = config::config_dir();
+                    let _ = std::fs::create_dir_all(&dir);
+                    if std::process::Command::new("xdg-open")
+                        .arg(&dir)
+                        .spawn()
+                        .is_err()
+                    {
+                        self.notify(format!("Settings folder: {}", dir.display()));
+                    }
+                }
                 if ui.button("About").clicked() {
                     ui.close();
                     self.show_about = true;
@@ -708,6 +677,56 @@ impl JournalApp {
                 self.live_indicator(ui);
             });
         });
+    }
+
+    /// Theme picker (View → Theme). Hovering a theme previews it.
+    fn theme_menu(&mut self, ui: &mut egui::Ui) {
+        let mut pick = None;
+        let mut shown = false;
+        let mut hovered: Option<String> = None;
+        let themes = self.settings.all_themes();
+        for (title, dark) in [("Dark themes", true), ("Light themes", false)] {
+            ui.menu_button(title, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(480.0)
+                    .show(ui, |ui| {
+                        shown = true;
+                        for t in themes.iter().filter(|t| t.dark == dark) {
+                            let sel = t.name == self.settings.theme;
+                            let r = ui.radio(sel, &t.name);
+                            if r.hovered() {
+                                hovered = Some(t.name.clone());
+                            }
+                            if r.clicked() {
+                                pick = Some(t.name.clone());
+                            }
+                        }
+                    });
+            });
+        }
+        ui.label(
+            RichText::new(format!("Current: {}", self.settings.theme))
+                .small()
+                .weak(),
+        );
+        ui.separator();
+        if ui.button("Edit colours…").clicked() {
+            ui.close();
+            self.settings_ui.open = true;
+            self.settings_ui.tab = crate::settings_ui::Tab::Appearance;
+        }
+        self.theme_list_shown |= shown;
+        if hovered.is_some() {
+            self.theme_hovered = hovered;
+        }
+        if let Some(name) = pick {
+            self.settings.theme = name;
+            self.theme_preview = None;
+            let ctx = ui.ctx().clone();
+            self.apply_style(&ctx);
+            self.mark_dirty();
+            ui.close();
+        }
     }
 
     fn live_indicator(&mut self, ui: &mut egui::Ui) {

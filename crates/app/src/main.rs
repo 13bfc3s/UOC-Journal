@@ -45,35 +45,132 @@ fn icon() -> egui::IconData {
     }
 }
 
-/// Write panics (with a backtrace) to `crash.log` in the settings folder so
-/// crashes can be reported, then keep the default behaviour.
+/// Set in the child process started by [`supervise`].
+const CHILD_ENV: &str = "UOC_JOURNAL_CHILD";
+
+fn unix_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Append a report to `crash.log` in the settings folder.
+fn write_crash_log(report: &str) {
+    use std::io::Write;
+    let dir = config::config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("crash.log"))
+    {
+        let _ = f.write_all(report.as_bytes());
+    }
+}
+
+/// Print panics with a backtrace. Without a supervising parent the report also
+/// goes straight to `crash.log`; otherwise the parent records it from stderr.
 fn install_crash_log() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let dir = config::config_dir();
-        let _ = std::fs::create_dir_all(&dir);
         let bt = std::backtrace::Backtrace::force_capture();
-        let when = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
         let report = format!(
-            "UOC Journal {} crashed (unix time {when})\n{info}\n\n{bt}\n\n",
-            env!("CARGO_PKG_VERSION")
+            "UOC Journal {} panicked (unix time {})\n{info}\n\n{bt}\n\n",
+            env!("CARGO_PKG_VERSION"),
+            unix_time()
         );
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("crash.log"))
-        {
-            let _ = f.write_all(report.as_bytes());
+        if std::env::var_os(CHILD_ENV).is_none() {
+            write_crash_log(&report);
         }
+        eprint!("{report}");
         default(info);
     }));
 }
 
+/// Run the app in a child process and log how it died. Native crashes
+/// (graphics driver, X11/Wayland) kill the process without running the panic
+/// hook, so only a parent can see them. Returns `None` when the app should run
+/// in this process instead.
+fn supervise() -> Option<i32> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Command, Stdio};
+
+    if std::env::var_os(CHILD_ENV).is_some()
+        || std::env::var_os("UOC_JOURNAL_NO_WATCHDOG").is_some()
+    {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let mut child = Command::new(exe)
+        .args(std::env::args_os().skip(1))
+        .env(CHILD_ENV, "1")
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let stderr = child.stderr.take()?;
+    let reader = std::thread::spawn(move || {
+        // Pass stderr through and keep its tail for the report.
+        let mut tail = std::collections::VecDeque::with_capacity(400);
+        let mut err = std::io::stderr();
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let _ = writeln!(err, "{line}");
+            if tail.len() == 400 {
+                tail.pop_front();
+            }
+            tail.push_back(line);
+        }
+        tail
+    });
+    let status = child.wait().ok()?;
+    let tail = reader.join().unwrap_or_default();
+    if status.success() {
+        return Some(0);
+    }
+    let reason = match (status.code(), status.signal()) {
+        (Some(code), _) => Some(format!("exited with code {code}")),
+        (None, Some(sig)) => {
+            let name = match sig {
+                4 => "SIGILL, illegal instruction",
+                5 => "SIGTRAP",
+                6 => "SIGABRT, aborted",
+                7 => "SIGBUS, bus error",
+                8 => "SIGFPE, arithmetic error",
+                9 => "SIGKILL, killed (possibly out of memory)",
+                11 => "SIGSEGV, segmentation fault",
+                // Normal ways of being asked to quit (logout, Ctrl+C, kill).
+                1 | 2 | 15 => "",
+                _ => "unexpected signal",
+            };
+            (!name.is_empty()).then(|| format!("killed by signal {sig} ({name})"))
+        }
+        _ => None,
+    };
+    if let Some(reason) = reason {
+        let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".into());
+        let report = format!(
+            "UOC Journal {} {reason} (unix time {}, session {session})\n\
+             --- last {} lines of output ---\n{}\n\n",
+            env!("CARGO_PKG_VERSION"),
+            unix_time(),
+            tail.len(),
+            tail.into_iter().collect::<Vec<_>>().join("\n")
+        );
+        write_crash_log(&report);
+    }
+    Some(
+        status
+            .code()
+            .or(status.signal().map(|s| 128 + s))
+            .unwrap_or(1),
+    )
+}
+
 fn main() -> eframe::Result {
+    if let Some(code) = supervise() {
+        std::process::exit(code);
+    }
     install_crash_log();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
