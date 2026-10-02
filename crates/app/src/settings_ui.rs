@@ -24,10 +24,6 @@ pub enum Tab {
 #[derive(Default)]
 pub struct SettingsUi {
     pub open: bool,
-    /// The native settings window exists (it is hidden rather than destroyed).
-    created: bool,
-    /// The native settings window is currently visible.
-    shown: bool,
     pub tab: Tab,
     pub folder_text: String,
     rules_draft: Option<Vec<UserRule>>,
@@ -59,10 +55,10 @@ pub fn viewport_id() -> egui::ViewportId {
 /// callbacks, so it never redraws; an immediate viewport, drawn inside the
 /// journal's pass, froze along with it.
 pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
-    // Once created, the settings window is kept alive and only hidden when
-    // closed: destroying and recreating native windows (and their GL surfaces)
-    // was the fragile path.
-    if (!app.settings_ui.open && !app.settings_ui.created) || ctx.embed_viewports() {
+    // Closing really closes the window: once the journal's pass no longer
+    // shows the viewport, eframe destroys it. (Hiding it instead does not work
+    // on Wayland, which has no way to hide a window; it just turned black.)
+    if !app.settings_ui.open || ctx.embed_viewports() {
         return;
     }
     let id = viewport_id();
@@ -86,16 +82,6 @@ pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
         };
         window_pass(&mut app, ui, class);
     });
-    app.settings_ui.created = true;
-    if app.settings_ui.open && !app.settings_ui.shown {
-        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Focus);
-        app.settings_ui.shown = true;
-        ctx.request_repaint_of(id);
-    } else if !app.settings_ui.open && app.settings_ui.shown {
-        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Visible(false));
-        app.settings_ui.shown = false;
-    }
 }
 
 /// Draw the embedded fallback (no multi-window support) inside the journal.
@@ -123,17 +109,16 @@ fn window_pass(app: &mut JournalApp, ui: &mut egui::Ui, class: egui::ViewportCla
     let wants_close = vctx
         .input(|i| i.viewport().close_requested() || (open && i.key_pressed(egui::Key::Escape)));
     if wants_close {
-        // Hide instead of letting the window be destroyed.
-        vctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        vctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        // The journal's next pass stops showing the viewport, which closes it.
         app.settings_ui.open = false;
-        app.settings_ui.shown = false;
     }
     app.settings_ui.theme_list_shown = false;
     app.settings_ui.theme_hovered = None;
     app.settings_ui.font_list_shown = false;
     app.settings_ui.font_hovered = None;
-    if app.settings_ui.open {
+    {
+        // Keep drawing during the closing pass so the window never shows a
+        // blank frame before it goes away.
         let fill = app.palette.panel;
         egui::CentralPanel::default()
             .frame(
@@ -142,6 +127,11 @@ fn window_pass(app: &mut JournalApp, ui: &mut egui::Ui, class: egui::ViewportCla
                     .inner_margin(egui::Margin::same(10)),
             )
             .show(ui, |ui| contents(app, ui));
+    }
+    if !app.settings_ui.open {
+        // Lists drawn in the closing pass must not keep a preview alive.
+        app.settings_ui.theme_list_shown = false;
+        app.settings_ui.font_list_shown = false;
     }
     app.resolve_previews(&vctx);
     // Changes made here (theme, filters, rules …) show in the journal on its
