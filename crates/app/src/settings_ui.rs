@@ -24,6 +24,10 @@ pub enum Tab {
 #[derive(Default)]
 pub struct SettingsUi {
     pub open: bool,
+    /// The native settings window exists (it is hidden rather than destroyed).
+    created: bool,
+    /// The native settings window is currently visible.
+    shown: bool,
     pub tab: Tab,
     pub folder_text: String,
     rules_draft: Option<Vec<UserRule>>,
@@ -39,9 +43,13 @@ pub struct SettingsUi {
 /// (outside the journal, onto another monitor). Backends without multi-window
 /// support fall back to an in-app window automatically.
 pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
-    if !app.settings_ui.open {
+    // Once created, the settings window is kept alive and only hidden when
+    // closed: destroying and recreating native windows (and their GL surfaces)
+    // was the fragile path.
+    if !app.settings_ui.open && !app.settings_ui.created {
         return;
     }
+    let id = egui::ViewportId::from_hash_of("uoc-journal-settings");
     let mut builder = egui::ViewportBuilder::default()
         .with_title("UOC Journal — Settings")
         .with_app_id("uoc-journal-settings")
@@ -50,34 +58,60 @@ pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
     if app.settings.always_on_top {
         builder = builder.with_always_on_top();
     }
+    let open = app.settings_ui.open;
+    let reveal = open && !app.settings_ui.shown;
     let mut close = false;
-    ctx.show_viewport_immediate(
-        egui::ViewportId::from_hash_of("uoc-journal-settings"),
-        builder,
-        |ui, class| {
-            if class == egui::ViewportClass::EmbeddedWindow {
-                // Rendered inside the main window by egui; it handles closing.
+    let mut embedded = false;
+    ctx.show_viewport_immediate(id, builder, |ui, class| {
+        if class == egui::ViewportClass::EmbeddedWindow {
+            // No multi-window support: egui draws it inside the main window.
+            embedded = true;
+            if open {
                 contents(app, ui);
-                return;
             }
-            let fill = app.palette.panel;
-            egui::CentralPanel::default()
-                .frame(
-                    egui::Frame::new()
-                        .fill(fill)
-                        .inner_margin(egui::Margin::same(10)),
-                )
-                .show(ui, |ui| contents(app, ui));
-            if ui
-                .ctx()
-                .input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape))
-            {
-                close = true;
-            }
-        },
-    );
-    if close {
+            return;
+        }
+        let vctx = ui.ctx().clone();
+        let wants_close = vctx.input(|i| {
+            i.viewport().close_requested() || (open && i.key_pressed(egui::Key::Escape))
+        });
+        if wants_close {
+            // Hide instead of letting the window be destroyed.
+            vctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            close = true;
+        }
+        if reveal {
+            vctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            vctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        if !open {
+            return;
+        }
+        let fill = app.palette.panel;
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(fill)
+                    .inner_margin(egui::Margin::same(10)),
+            )
+            .show(ui, |ui| contents(app, ui));
+    });
+    if embedded {
+        app.settings_ui.created = false;
+        if close {
+            app.settings_ui.open = false;
+        }
+        return;
+    }
+    app.settings_ui.created = true;
+    if close && app.settings_ui.open {
         app.settings_ui.open = false;
+    }
+    if !app.settings_ui.open && app.settings_ui.shown {
+        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Visible(false));
+        app.settings_ui.shown = false;
+    } else if app.settings_ui.open {
+        app.settings_ui.shown = true;
     }
 }
 
@@ -390,17 +424,15 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                             .add(
                                 egui::TextEdit::singleline(&mut app.settings.time_custom)
                                     .desired_width(220.0)
-                                    .hint_text("%Y-%m-%d %H:%M:%S"),
+                                    .hint_text("%Y-%m-%d %H:%M"),
                             )
                             .changed();
-                        let now = app.store.entries().last().map(|e| (e.time, e.seconds()));
-                        let (t, secs) = now.unwrap_or((
-                            uoj_core::time::minutes(2026, 3, 14, 18, 5).unwrap_or(0),
-                            Some(9),
-                        ));
+                        let t = app.store.entries().last().map(|e| e.time).unwrap_or_else(|| {
+                            uoj_core::time::minutes(2026, 3, 14, 18, 5).unwrap_or(0)
+                        });
                         ui.label(RichText::new("preview:").weak());
                         ui.label(
-                            RichText::new(uoj_core::time::format(t, secs, &app.settings.time_custom))
+                            RichText::new(uoj_core::time::format(t, None, &app.settings.time_custom))
                                 .color(app.palette.accent)
                                 .monospace(),
                         );
@@ -409,20 +441,12 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                         RichText::new(
                             "%Y year  %y 2-digit year  %m month  %d day  %e day (no zero)  \
                              %b/%B month name  %a/%A weekday\n%H hour  %I 12-hour  %l 12-hour (no zero)  \
-                             %M minute  %S second  %p AM/PM  %P am/pm  %F date  %T time  %R HH:MM  %% percent",
+                             %M minute  %p AM/PM  %P am/pm  %F date  %R HH:MM  %% percent",
                         )
                         .small()
                         .weak(),
                     );
                 }
-                ui.label(
-                    RichText::new(
-                        "Journal files only record minutes; seconds are known for lines that arrive \
-                         while UOC Journal is running (older lines show --).",
-                    )
-                    .small()
-                    .weak(),
-                );
             });
             ui.end_row();
 
@@ -714,6 +738,16 @@ fn channels_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
          background, and add regular-expression rules that move matching lines into it. Rules \
          run after the built-in sorting, in list order, and the first match wins.",
     );
+    ui.add_space(4.0);
+    if ui
+        .checkbox(
+            &mut app.settings.show_badges,
+            "Show channel badges in front of each line",
+        )
+        .changed()
+    {
+        app.mark_dirty();
+    }
     ui.add_space(6.0);
     let mut draft = app
         .settings_ui
@@ -764,6 +798,31 @@ fn channels_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                     .strong();
                 sample = sample.background_color(bg.unwrap_or(theme.background).color());
                 ui.add_sized([90.0, 20.0], egui::Label::new(sample));
+                ui.label("badge");
+                let mut badge = app
+                    .settings
+                    .channel_badges
+                    .get(&label)
+                    .cloned()
+                    .unwrap_or_default();
+                let edit = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut badge)
+                            .char_limit(3)
+                            .desired_width(40.0)
+                            .font(egui::TextStyle::Monospace)
+                            .hint_text(RichText::new(c.badge()).monospace()),
+                    )
+                    .on_hover_text("Up to three letters shown in front of each line. Leave empty for the default.");
+                if edit.changed() {
+                    let badge = badge.trim().to_string();
+                    if badge.is_empty() || badge == c.badge() {
+                        app.settings.channel_badges.remove(&label);
+                    } else {
+                        app.settings.channel_badges.insert(label.clone(), badge);
+                    }
+                    app.mark_dirty();
+                }
                 ui.label("text");
                 let mut fg_edit = fg;
                 if ui.color_edit_button_srgb(&mut fg_edit.0).changed() {

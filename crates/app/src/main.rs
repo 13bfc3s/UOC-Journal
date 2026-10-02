@@ -45,7 +45,36 @@ fn icon() -> egui::IconData {
     }
 }
 
+/// Write panics (with a backtrace) to `crash.log` in the settings folder so
+/// crashes can be reported, then keep the default behaviour.
+fn install_crash_log() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let dir = config::config_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let bt = std::backtrace::Backtrace::force_capture();
+        let when = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let report = format!(
+            "UOC Journal {} crashed (unix time {when})\n{info}\n\n{bt}\n\n",
+            env!("CARGO_PKG_VERSION")
+        );
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("crash.log"))
+        {
+            let _ = f.write_all(report.as_bytes());
+        }
+        default(info);
+    }));
+}
+
 fn main() -> eframe::Result {
+    install_crash_log();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("UOC Journal")

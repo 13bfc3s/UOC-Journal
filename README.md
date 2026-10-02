@@ -60,9 +60,9 @@ panes side by side.
   background. The default rule highlights reds and PKs in guild and alliance
   chat.
 - **Themes.** 45 built in. They include Midnight, Daylight, Britannia, Classic UO, High Contrast, and popular editor palettes (Dracula, Solarized, Gruvbox, Monokai, One Dark, Tokyo Night, Catppuccin, Everforest, Rosé Pine, Kanagawa, Nord, …). There are also UO-flavoured themes like Moonglow, Blood Moon, Virtue and Parchment, and retro terminals. A colour editor lets you change every colour. You can also set the font size, pick any installed font for the journal text from a searchable list (or add font files with Browse…), use monospace, colour each name differently, and import or export themes as TOML.
-- **Time column.** Choose HH:MM, MM-DD HH:MM, YYYY-MM-DD HH:MM:SS, hidden, or your own pattern with `%` codes (`%a %l:%M:%S %p`, `%F %T`, …). Journal files only store minutes, so seconds are only known for lines that arrive while the app is running. Older lines show `--`.
+- **Time column.** Choose HH:MM, MM-DD HH:MM, YYYY-MM-DD HH:MM, hidden, or your own pattern with `%` codes (`%a %l:%M %p`, `%F %R`, …). Journal files only store minutes, so there are no seconds.
 - **Character chips.** With several clients, each line carries a chip for its character. New characters get initials and a distinct colour automatically. Click a chip in the status bar to change its letters (up to three) or colour.
-- **Channels page.** For each channel you can set its text colour, a row background (on by default, with a light tint), and its own regex rules for moving matching lines into it. A test box shows where a pasted line lands.
+- **Channels page.** For each channel you can set its badge letters (up to three), its text colour, a row background (on by default, with a light tint), and its own regex rules for moving matching lines into it. A test box shows where a pasted line lands.
 - Copying, exporting, selecting lines (Shift+click), a context menu on every
   line, and keyboard navigation.
 

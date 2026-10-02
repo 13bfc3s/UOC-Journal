@@ -3,6 +3,7 @@
 //! Portable mode: if `uoc-journal.toml` sits next to the executable it is used
 //! (and written) there; otherwise the per-user config directory is used.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -26,8 +27,9 @@ pub enum TimeFormat {
     #[default]
     Time,
     DateTime,
-    /// `YYYY-MM-DD HH:MM:SS`
-    FullSeconds,
+    /// `YYYY-MM-DD HH:MM`
+    #[serde(alias = "FullSeconds")]
+    FullDate,
     /// The user's own pattern (`Settings::time_custom`).
     Custom,
     Hidden,
@@ -37,7 +39,7 @@ impl TimeFormat {
     pub const ALL: [TimeFormat; 5] = [
         TimeFormat::Time,
         TimeFormat::DateTime,
-        TimeFormat::FullSeconds,
+        TimeFormat::FullDate,
         TimeFormat::Custom,
         TimeFormat::Hidden,
     ];
@@ -46,7 +48,7 @@ impl TimeFormat {
         match self {
             TimeFormat::Time => "HH:MM",
             TimeFormat::DateTime => "MM-DD HH:MM",
-            TimeFormat::FullSeconds => "YYYY-MM-DD HH:MM:SS",
+            TimeFormat::FullDate => "YYYY-MM-DD HH:MM",
             TimeFormat::Custom => "Custom…",
             TimeFormat::Hidden => "Hidden",
         }
@@ -57,7 +59,7 @@ impl TimeFormat {
         match self {
             TimeFormat::Time => Some("%H:%M".into()),
             TimeFormat::DateTime => Some("%m-%d %H:%M".into()),
-            TimeFormat::FullSeconds => Some("%Y-%m-%d %H:%M:%S".into()),
+            TimeFormat::FullDate => Some("%Y-%m-%d %H:%M".into()),
             TimeFormat::Custom => Some(custom.to_string()).filter(|c| !c.is_empty()),
             TimeFormat::Hidden => None,
         }
@@ -276,6 +278,8 @@ pub struct Settings {
     /// Pattern used when `time_format` is Custom (see `uoj_core::time::format`).
     pub time_custom: String,
     pub show_badges: bool,
+    /// Custom badge letters per channel label (up to three characters).
+    pub channel_badges: BTreeMap<String, String>,
     pub color_names: bool,
     /// Prefix lines with the character name when more than one client is logged.
     pub character_tags: bool,
@@ -302,8 +306,9 @@ impl Default for Settings {
             font_path: None,
             extra_fonts: Vec::new(),
             time_format: TimeFormat::Time,
-            time_custom: "%a %l:%M:%S %p".into(),
+            time_custom: "%a %l:%M %p".into(),
             show_badges: false,
+            channel_badges: BTreeMap::new(),
             color_names: true,
             character_tags: true,
             always_on_top: false,
@@ -332,6 +337,16 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Badge letters for a channel: the user's own, or the built-in default.
+    pub fn badge(&self, c: Channel) -> String {
+        self.channel_badges
+            .get(c.label())
+            .map(|b| b.trim())
+            .filter(|b| !b.is_empty())
+            .map(|b| b.chars().take(3).collect())
+            .unwrap_or_else(|| c.badge().to_string())
+    }
+
     pub fn all_themes(&self) -> Vec<Theme> {
         let mut v = crate::theme::presets();
         for t in &self.custom_themes {
@@ -375,7 +390,13 @@ pub fn load(dir: &Path) -> (Settings, Option<String>) {
     let path = dir.join(SETTINGS_FILE);
     match std::fs::read_to_string(&path) {
         Ok(s) => match toml::from_str::<Settings>(&s) {
-            Ok(settings) => (settings, None),
+            Ok(mut settings) => {
+                // The old default showed seconds, which journal files never record.
+                if settings.time_custom == "%a %l:%M:%S %p" {
+                    settings.time_custom = "%a %l:%M %p".into();
+                }
+                (settings, None)
+            }
             Err(e) => {
                 // Keep the broken file around instead of overwriting the user's edits.
                 let _ = std::fs::copy(&path, dir.join(format!("{SETTINGS_FILE}.broken")));
@@ -426,6 +447,18 @@ mod tests {
         let text = toml::to_string_pretty(&s).unwrap();
         let back: Settings = toml::from_str(&text).unwrap();
         assert_eq!(s, back);
+    }
+
+    #[test]
+    fn badges_and_old_time_format() {
+        let mut s = Settings::default();
+        assert_eq!(s.badge(Channel::Guild), "GLD");
+        s.channel_badges.insert("Guild".into(), " GUILD ".into());
+        s.channel_badges.insert("Party".into(), "  ".into());
+        assert_eq!(s.badge(Channel::Guild), "GUI");
+        assert_eq!(s.badge(Channel::Party), "PTY");
+        let old: Settings = toml::from_str("time_format = \"FullSeconds\"").unwrap();
+        assert_eq!(old.time_format, TimeFormat::FullDate);
     }
 
     #[test]

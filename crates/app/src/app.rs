@@ -1011,6 +1011,7 @@ impl eframe::App for JournalApp {
                 .time_format
                 .pattern(&self.settings.time_custom),
             badges: self.settings.show_badges,
+            badge_text: Channel::ALL.map(|c| self.settings.badge(c)),
             color_names: self.settings.color_names,
             character_tags: self.settings.character_tags && self.characters.len() > 1,
             highlights: &self.highlights,

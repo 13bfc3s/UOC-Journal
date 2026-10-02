@@ -67,6 +67,8 @@ pub struct RowStyle<'a> {
     /// strftime-style time column pattern; `None` hides the column.
     pub time_pattern: Option<String>,
     pub badges: bool,
+    /// Badge text per channel, indexed by `Channel::index`.
+    pub badge_text: [String; Channel::COUNT],
     pub color_names: bool,
     /// Prefix rows with the character name.
     pub character_tags: bool,
@@ -157,15 +159,12 @@ pub enum LogAction {
     Highlight(String),
 }
 
-/// Render one entry as `[HH:MM] speaker: text` for the clipboard.
-/// Full timestamp, with seconds when they are known.
+/// Full timestamp. Journal files only record minutes.
 pub fn full_stamp(e: &Entry) -> String {
-    match e.seconds() {
-        Some(s) => time::format(e.time, Some(s), "%Y-%m-%d %H:%M:%S"),
-        None => time::ymd_hm(e.time),
-    }
+    time::ymd_hm(e.time)
 }
 
+/// Render one entry as `[YYYY-MM-DD HH:MM] speaker: text` for the clipboard.
 pub fn plain_line(store: &Store, e: &Entry) -> String {
     let speaker = store.speaker(e);
     if speaker.is_empty() {
@@ -674,7 +673,7 @@ impl LogView<'_> {
                 clip.text(
                     br.center(),
                     Align2::CENTER_CENTER,
-                    e.channel.badge(),
+                    &self.style.badge_text[e.channel.index()],
                     badge_font.clone(),
                     c,
                 );
