@@ -101,7 +101,7 @@ pub fn scan_system_fonts() -> Vec<FontEntry> {
     files.sort();
     files.dedup();
     let mut out: Vec<FontEntry> = files.iter().filter_map(|p| describe(p)).collect();
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|f| f.name.to_lowercase());
     out.dedup_by(|a, b| a.name == b.name);
     out
 }
