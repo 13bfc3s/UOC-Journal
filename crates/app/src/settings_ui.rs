@@ -256,15 +256,18 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                         );
                         let needle = app.settings_ui.font_filter.to_lowercase();
                         let mut pick: Option<Option<std::path::PathBuf>> = None;
-                        if needle.is_empty()
-                            && ui
-                                .selectable_label(
-                                    app.settings.font_path.is_none(),
-                                    "Built-in (default)",
-                                )
-                                .clicked()
-                        {
-                            pick = Some(None);
+                        let mut hovered: Option<Option<std::path::PathBuf>> = None;
+                        if needle.is_empty() {
+                            let r = ui.selectable_label(
+                                app.settings.font_path.is_none(),
+                                "Built-in (default)",
+                            );
+                            if r.hovered() {
+                                hovered = Some(None);
+                            }
+                            if r.clicked() {
+                                pick = Some(None);
+                            }
                         }
                         let mut section =
                             |ui: &mut egui::Ui, title: &str, list: &[crate::fonts::FontEntry]| {
@@ -281,11 +284,13 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                                 ui.label(RichText::new(title).small().weak());
                                 for f in shown {
                                     let sel = app.settings.font_path.as_ref() == Some(&f.path);
-                                    if ui
+                                    let r = ui
                                         .selectable_label(sel, &f.name)
-                                        .on_hover_text(f.path.display().to_string())
-                                        .clicked()
-                                    {
+                                        .on_hover_text(f.path.display().to_string());
+                                    if r.hovered() {
+                                        hovered = Some(Some(f.path.clone()));
+                                    }
+                                    if r.clicked() {
                                         pick = Some(Some(f.path.clone()));
                                     }
                                 }
@@ -298,7 +303,12 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                                 ui.label("Looking for installed fonts…");
                             });
                         }
+                        app.font_list_shown = true;
+                        if hovered.is_some() {
+                            app.font_hovered = hovered;
+                        }
                         if let Some(choice) = pick {
+                            app.font_preview = None;
                             app.settings.font_path = choice;
                             restyle = true;
                             ui.close();

@@ -57,6 +57,10 @@ pub struct JournalApp {
     /// Set by any theme list drawn this frame.
     pub theme_list_shown: bool,
     pub theme_hovered: Option<String>,
+    /// Font shown while hovering the font list (`Some(None)` = built-in).
+    pub font_preview: Option<Option<PathBuf>>,
+    pub font_list_shown: bool,
+    pub font_hovered: Option<Option<PathBuf>>,
     /// Installed fonts (scanned in the background on first use).
     pub system_fonts: Option<Vec<crate::fonts::FontEntry>>,
     fonts_rx: Option<std::sync::mpsc::Receiver<Vec<crate::fonts::FontEntry>>>,
@@ -110,6 +114,9 @@ impl JournalApp {
             theme_preview: None,
             theme_list_shown: false,
             theme_hovered: None,
+            font_preview: None,
+            font_list_shown: false,
+            font_hovered: None,
             system_fonts: None,
             fonts_rx: None,
             characters: Vec::new(),
@@ -303,10 +310,14 @@ impl JournalApp {
             s.spacing.item_spacing = egui::vec2(6.0, 4.0);
             s.spacing.button_padding = egui::vec2(6.0, 2.0);
         });
-        let fonts_key = (self.settings.font_path.clone(), 0.0);
+        let font_path = match &self.font_preview {
+            Some(p) => p.clone(),
+            None => self.settings.font_path.clone(),
+        };
+        let fonts_key = (font_path.clone(), 0.0);
         if self.applied_fonts.as_ref() != Some(&fonts_key) {
             let mut defs = FontDefinitions::default();
-            if let Some(path) = &self.settings.font_path {
+            if let Some(path) = &font_path {
                 match std::fs::read(path) {
                     Ok(bytes) => {
                         defs.font_data.insert(
@@ -953,6 +964,8 @@ impl eframe::App for JournalApp {
         self.pump(&ctx);
         self.theme_list_shown = false;
         self.theme_hovered = None;
+        self.font_list_shown = false;
+        self.font_hovered = None;
         self.shortcuts(&ctx);
 
         let pal = self.palette.clone();
@@ -1064,6 +1077,18 @@ impl eframe::App for JournalApp {
         } else {
             self.theme_preview.clone()
         };
+        let want_font = if !self.font_list_shown {
+            None
+        } else if self.font_hovered.is_some() {
+            self.font_hovered.clone()
+        } else {
+            self.font_preview.clone()
+        };
+        if want_font != self.font_preview {
+            self.font_preview = want_font;
+            self.apply_style(&ctx);
+            ctx.request_repaint();
+        }
         if want != self.theme_preview {
             self.theme_preview = want;
             self.apply_style(&ctx);
