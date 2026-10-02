@@ -178,13 +178,17 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
             ui.label("Theme");
             egui::ComboBox::from_id_salt("theme_pick")
                 .selected_text(app.settings.theme.clone())
+                .height(420.0)
                 .show_ui(ui, |ui| {
+                    app.theme_list_shown = true;
                     for t in app.settings.all_themes() {
-                        if ui
-                            .selectable_label(t.name == app.settings.theme, &t.name)
-                            .clicked()
-                        {
+                        let r = ui.selectable_label(t.name == app.settings.theme, &t.name);
+                        if r.hovered() {
+                            app.theme_hovered = Some(t.name.clone());
+                        }
+                        if r.clicked() {
                             app.settings.theme = t.name.clone();
+                            app.theme_preview = None;
                             restyle = true;
                         }
                     }

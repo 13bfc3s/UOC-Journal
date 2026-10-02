@@ -52,6 +52,11 @@ pub struct JournalApp {
     /// Lines with a lower id are hidden ("Clear").
     clear_mark: u32,
     pending_alert: bool,
+    /// Theme shown while hovering a theme list (not saved until clicked).
+    pub theme_preview: Option<String>,
+    /// Set by any theme list drawn this frame.
+    pub theme_list_shown: bool,
+    pub theme_hovered: Option<String>,
     characters: Vec<String>,
 }
 
@@ -99,6 +104,9 @@ impl JournalApp {
             applied_fonts: None,
             clear_mark: 0,
             pending_alert: false,
+            theme_preview: None,
+            theme_list_shown: false,
+            theme_hovered: None,
             characters: Vec::new(),
             settings,
         };
@@ -239,7 +247,17 @@ impl JournalApp {
     }
 
     pub fn apply_style(&mut self, ctx: &egui::Context) {
-        self.palette = Palette::from_theme(&self.settings.current_theme());
+        let theme = self
+            .theme_preview
+            .as_ref()
+            .and_then(|n| {
+                self.settings
+                    .all_themes()
+                    .into_iter()
+                    .find(|t| &t.name == n)
+            })
+            .unwrap_or_else(|| self.settings.current_theme());
+        self.palette = Palette::from_theme(&theme);
         self.refresh_chips();
         let visuals = self.palette.visuals();
         ctx.set_visuals_of(egui::Theme::Dark, visuals.clone());
@@ -574,15 +592,22 @@ impl JournalApp {
             });
             ui.menu_button("Theme", |ui| {
                 let mut pick = None;
+                let mut shown = false;
+                let mut hovered: Option<String> = None;
                 let themes = self.settings.all_themes();
                 for (title, dark) in [("Dark themes", true), ("Light themes", false)] {
                     ui.menu_button(title, |ui| {
                         egui::ScrollArea::vertical()
                             .max_height(480.0)
                             .show(ui, |ui| {
+                                shown = true;
                                 for t in themes.iter().filter(|t| t.dark == dark) {
                                     let sel = t.name == self.settings.theme;
-                                    if ui.radio(sel, &t.name).clicked() {
+                                    let r = ui.radio(sel, &t.name);
+                                    if r.hovered() {
+                                        hovered = Some(t.name.clone());
+                                    }
+                                    if r.clicked() {
                                         pick = Some(t.name.clone());
                                     }
                                 }
@@ -600,11 +625,17 @@ impl JournalApp {
                     self.settings_ui.open = true;
                     self.settings_ui.tab = crate::settings_ui::Tab::Appearance;
                 }
+                self.theme_list_shown |= shown;
+                if hovered.is_some() {
+                    self.theme_hovered = hovered;
+                }
                 if let Some(name) = pick {
                     self.settings.theme = name;
+                    self.theme_preview = None;
                     let ctx = ui.ctx().clone();
                     self.apply_style(&ctx);
                     self.mark_dirty();
+                    ui.close();
                 }
             });
             if ui.button("Settings").clicked() {
@@ -896,6 +927,8 @@ impl eframe::App for JournalApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.pump(&ctx);
+        self.theme_list_shown = false;
+        self.theme_hovered = None;
         self.shortcuts(&ctx);
 
         let pal = self.palette.clone();
@@ -997,6 +1030,21 @@ impl eframe::App for JournalApp {
         self.welcome_window(&ctx);
         self.help_window(&ctx);
         crate::settings_ui::show(self, &ctx);
+
+        // Live theme preview: hovering a theme shows it; leaving the list without
+        // clicking (menu or dropdown closes) goes back to the saved theme.
+        let want = if !self.theme_list_shown {
+            None
+        } else if self.theme_hovered.is_some() {
+            self.theme_hovered.clone()
+        } else {
+            self.theme_preview.clone()
+        };
+        if want != self.theme_preview {
+            self.theme_preview = want;
+            self.apply_style(&ctx);
+            ctx.request_repaint();
+        }
 
         // Persist.
         if self.settings_dirty && self.settings_changed_at.elapsed() > Duration::from_millis(1200) {
