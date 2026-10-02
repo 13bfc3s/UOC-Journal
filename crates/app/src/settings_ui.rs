@@ -30,6 +30,9 @@ pub struct SettingsUi {
     test_line: String,
     theme_import: String,
     new_theme_name: String,
+    font_filter: String,
+    /// Browse-added font paths and their display names.
+    extra_cache: (Vec<std::path::PathBuf>, Vec<crate::fonts::FontEntry>),
 }
 
 pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
@@ -201,27 +204,125 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                 .changed();
             ui.end_row();
 
-            ui.label("Font file");
+            ui.label("Font");
             ui.horizontal(|ui| {
-                let label = app
-                    .settings
-                    .font_path
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "built-in".into());
-                ui.label(RichText::new(label).small());
-                if ui.button("Choose…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new()
-                        .add_filter("Fonts", &["ttf", "otf"])
-                        .pick_file()
-                    {
-                        app.settings.font_path = Some(p);
-                        restyle = true;
-                    }
+                let ctx = ui.ctx().clone();
+                let system: Vec<crate::fonts::FontEntry> = app
+                    .system_fonts(&ctx)
+                    .map(|l| l.to_vec())
+                    .unwrap_or_default();
+                let scanning = app.system_fonts.is_none();
+                if app.settings_ui.extra_cache.0 != app.settings.extra_fonts {
+                    let described = app
+                        .settings
+                        .extra_fonts
+                        .iter()
+                        .map(|p| {
+                            crate::fonts::describe(p).unwrap_or(crate::fonts::FontEntry {
+                                name: p
+                                    .file_stem()
+                                    .map(|s| s.to_string_lossy().into_owned())
+                                    .unwrap_or_default(),
+                                path: p.clone(),
+                            })
+                        })
+                        .collect();
+                    app.settings_ui.extra_cache = (app.settings.extra_fonts.clone(), described);
                 }
-                if app.settings.font_path.is_some() && ui.button("Reset").clicked() {
-                    app.settings.font_path = None;
-                    restyle = true;
+                let extra = app.settings_ui.extra_cache.1.clone();
+                let current = match &app.settings.font_path {
+                    None => "Built-in (default)".to_string(),
+                    Some(p) => extra
+                        .iter()
+                        .chain(system.iter())
+                        .find(|f| &f.path == p)
+                        .map(|f| f.name.clone())
+                        .unwrap_or_else(|| {
+                            p.file_stem()
+                                .map(|s| s.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        }),
+                };
+                egui::ComboBox::from_id_salt("font_pick")
+                    .selected_text(current)
+                    .width(260.0)
+                    .height(420.0)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .show_ui(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut app.settings_ui.font_filter)
+                                .hint_text("Search fonts…")
+                                .desired_width(f32::INFINITY),
+                        );
+                        let needle = app.settings_ui.font_filter.to_lowercase();
+                        let mut pick: Option<Option<std::path::PathBuf>> = None;
+                        if needle.is_empty()
+                            && ui
+                                .selectable_label(
+                                    app.settings.font_path.is_none(),
+                                    "Built-in (default)",
+                                )
+                                .clicked()
+                        {
+                            pick = Some(None);
+                        }
+                        let mut section =
+                            |ui: &mut egui::Ui, title: &str, list: &[crate::fonts::FontEntry]| {
+                                let shown: Vec<&crate::fonts::FontEntry> = list
+                                    .iter()
+                                    .filter(|f| {
+                                        needle.is_empty() || f.name.to_lowercase().contains(&needle)
+                                    })
+                                    .collect();
+                                if shown.is_empty() {
+                                    return;
+                                }
+                                ui.separator();
+                                ui.label(RichText::new(title).small().weak());
+                                for f in shown {
+                                    let sel = app.settings.font_path.as_ref() == Some(&f.path);
+                                    if ui
+                                        .selectable_label(sel, &f.name)
+                                        .on_hover_text(f.path.display().to_string())
+                                        .clicked()
+                                    {
+                                        pick = Some(Some(f.path.clone()));
+                                    }
+                                }
+                            };
+                        section(ui, "Added with Browse", &extra);
+                        section(ui, "Installed fonts", &system);
+                        if scanning {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label("Looking for installed fonts…");
+                            });
+                        }
+                        if let Some(choice) = pick {
+                            app.settings.font_path = choice;
+                            restyle = true;
+                            ui.close();
+                        }
+                    });
+                if ui
+                    .button("Browse…")
+                    .on_hover_text("Add font files (.ttf, .otf, .ttc) to the list")
+                    .clicked()
+                {
+                    if let Some(files) = rfd::FileDialog::new()
+                        .add_filter("Fonts", &["ttf", "otf", "ttc"])
+                        .pick_files()
+                    {
+                        for f in &files {
+                            if !app.settings.extra_fonts.contains(f) {
+                                app.settings.extra_fonts.push(f.clone());
+                            }
+                        }
+                        if let Some(first) = files.first() {
+                            app.settings.font_path = Some(first.clone());
+                            restyle = true;
+                        }
+                    }
                 }
             });
             ui.end_row();

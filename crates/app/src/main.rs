@@ -3,6 +3,7 @@
 
 mod app;
 mod config;
+mod fonts;
 mod logview;
 mod pane;
 mod settings_ui;

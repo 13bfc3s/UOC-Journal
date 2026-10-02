@@ -57,6 +57,9 @@ pub struct JournalApp {
     /// Set by any theme list drawn this frame.
     pub theme_list_shown: bool,
     pub theme_hovered: Option<String>,
+    /// Installed fonts (scanned in the background on first use).
+    pub system_fonts: Option<Vec<crate::fonts::FontEntry>>,
+    fonts_rx: Option<std::sync::mpsc::Receiver<Vec<crate::fonts::FontEntry>>>,
     characters: Vec<String>,
 }
 
@@ -107,6 +110,8 @@ impl JournalApp {
             theme_preview: None,
             theme_list_shown: false,
             theme_hovered: None,
+            system_fonts: None,
+            fonts_rx: None,
             characters: Vec::new(),
             settings,
         };
@@ -226,6 +231,25 @@ impl JournalApp {
             self.mark_dirty();
         }
         changed
+    }
+
+    /// Installed fonts, starting a background scan on first call. `None` while scanning.
+    pub fn system_fonts(&mut self, ctx: &egui::Context) -> Option<&[crate::fonts::FontEntry]> {
+        if let Some(rx) = &self.fonts_rx {
+            if let Ok(list) = rx.try_recv() {
+                self.system_fonts = Some(list);
+                self.fonts_rx = None;
+            }
+        } else if self.system_fonts.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::fonts::scan_system_fonts());
+                ctx.request_repaint();
+            });
+            self.fonts_rx = Some(rx);
+        }
+        self.system_fonts.as_deref()
     }
 
     /// Copy chip settings into the palette used for painting.

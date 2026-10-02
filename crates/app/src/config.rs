@@ -235,6 +235,8 @@ pub struct Settings {
     pub monospace: bool,
     /// Optional .ttf/.otf used for all text.
     pub font_path: Option<PathBuf>,
+    /// Font files added with Browse…, listed alongside installed fonts.
+    pub extra_fonts: Vec<PathBuf>,
     pub time_format: TimeFormat,
     pub show_badges: bool,
     pub color_names: bool,
@@ -261,6 +263,7 @@ impl Default for Settings {
             font_size: 14.0,
             monospace: false,
             font_path: None,
+            extra_fonts: Vec::new(),
             time_format: TimeFormat::Time,
             show_badges: false,
             color_names: true,
