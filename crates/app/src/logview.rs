@@ -953,9 +953,9 @@ pub fn character_pill(ui: &mut egui::Ui, pal: &Palette, character: &str) -> egui
         .map(|f| f.size)
         .unwrap_or(11.0)
         * 1.3;
-    let (r, resp) = ui.allocate_exact_size(Vec2::new(pill_width(ui, size), size), Sense::hover());
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(pill_width(ui, size), size), Sense::click());
     paint_pill(ui.painter(), r, pal, character, size);
-    resp.on_hover_text(character)
+    resp.on_hover_text(format!("{character} — click to edit chips"))
 }
 
 pub fn text_width(ui: &egui::Ui, s: &str, font: &FontId) -> f32 {

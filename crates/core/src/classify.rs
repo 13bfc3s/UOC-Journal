@@ -190,6 +190,7 @@ const COMBAT_PATTERNS: &[&str] = &[
     r"(?i)\bpoison",
     r"(?i)\bparr(y|ied|ies)\b",
     r"(?i)\bfizzle",
+    r"(?i)explosion potion|explosive potion|throw it now|you should throw",
     r"(?i)concentration is disturbed",
     r"(?i)not yet recovered from casting",
     r"(?i)already casting",
@@ -438,7 +439,10 @@ impl Classifier {
 
         match name {
             "System" => {
-                if self.aspect_xp.is_match(text) && !text.contains(" has completed the achievement")
+                if has_emote(text) {
+                    out.channel = Channel::Emote;
+                } else if self.aspect_xp.is_match(text)
+                    && !text.contains(" has completed the achievement")
                 {
                     out.channel = Channel::System;
                 } else if let Some(n) = combat_number(text) {
@@ -487,6 +491,18 @@ impl Classifier {
             return out;
         }
 
+        // --- Explosion potion countdown: `3`, `2`, `1` over you or the potion ----
+        if is_explosion_countdown(name, text, is_self) {
+            out.channel = Channel::Combat;
+            return out;
+        }
+
+        // --- Emotes: anything in *asterisks* --------------------------------------
+        if has_emote(text) {
+            out.channel = Channel::Emote;
+            return out;
+        }
+
         // --- Name labels -------------------------------------------------------
         if let Some(label) = label_shape(name, text) {
             out.label = Some(label);
@@ -514,17 +530,6 @@ impl Classifier {
         // --- Spells -------------------------------------------------------------
         if self.spell_fmt.is_match(text) || self.spell_name(text).is_some() {
             out.channel = Channel::Spell;
-            return out;
-        }
-
-        // --- Emotes -------------------------------------------------------------
-        if text.len() >= 2 && text.starts_with('*') && text.ends_with('*') {
-            let creature = !starts_upper(name) && !(ctx.is_pet)(name);
-            out.channel = if self.combat.is_match(text) || creature {
-                Channel::Combat
-            } else {
-                Channel::Emote
-            };
             return out;
         }
 
@@ -567,6 +572,37 @@ fn leading_tag(text: &str) -> Option<&str> {
     let close = rest.find(']')?;
     let tag = &rest[..close];
     (!tag.is_empty() && tag.len() <= 8 && !tag.contains(' ')).then_some(tag)
+}
+
+/// Text containing a `*word*` segment (an emote, also when mixed with speech).
+pub fn has_emote(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut i = 0;
+    while let Some(p) = memchr::memchr(b'*', &b[i..]) {
+        let start = i + p;
+        match memchr::memchr(b'*', &b[start + 1..]) {
+            Some(q) => {
+                let inner = &text[start + 1..start + 1 + q];
+                if !inner.trim().is_empty() && !inner.starts_with(' ') {
+                    return true;
+                }
+                i = start + 1 + q;
+            }
+            None => return false,
+        }
+    }
+    false
+}
+
+/// Greater explosion potion countdown: small bare numbers over yourself or over
+/// the potion, or any line from an object named like an explosion potion.
+fn is_explosion_countdown(name: &str, text: &str, is_self: bool) -> bool {
+    let lname = name.to_ascii_lowercase();
+    if lname.contains("explosion") || lname.contains("explosive") {
+        return true;
+    }
+    let t = text.trim();
+    is_self && !t.is_empty() && t.len() <= 2 && t.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// `-190`, `+25`, `12` → signed amount. Damage is shown negative by the client.
@@ -648,10 +684,6 @@ pub fn label_shape<'a>(name: &str, text: &'a str) -> Option<Label<'a>> {
         {
             return Some(Label::Status { status: inner });
         }
-    }
-    // `*released*` on a pet
-    if text == "*released*" {
-        return Some(Label::Status { status: "released" });
     }
     None
 }
@@ -755,7 +787,12 @@ mod tests {
         assert!(fl & flags::INCOMING != 0);
         let (_, _, fl) = c("a frost troll", "-210");
         assert!(fl & flags::INCOMING == 0);
-        assert_eq!(c("a frost troll", "*looks enraged*").0, Channel::Combat);
+        assert_eq!(c("a frost troll", "*looks enraged*").0, Channel::Emote);
+        assert_eq!(c("Aldric Thorne", "3").0, Channel::Combat);
+        assert_eq!(c("Aldric Thorne", "1").0, Channel::Combat);
+        assert_eq!(c("a greater explosion potion", "2").0, Channel::Combat);
+        assert_eq!(c("Lysa Quill", "3").0, Channel::Speech);
+        assert_eq!(c("System", "You should throw it now!").0, Channel::Combat);
         assert_eq!(combat_number("-512"), Some(-512));
         assert_eq!(combat_number("+25"), Some(25));
         assert_eq!(combat_number("2"), None);
@@ -769,7 +806,7 @@ mod tests {
         assert_eq!(c("Garrick", "Garrick the tanner").0, Channel::Names);
         assert_eq!(c("Pip", "(bonded)").0, Channel::Names);
         assert_eq!(c("a dire wolf", "a dire wolf").0, Channel::Names);
-        assert_eq!(c("Pip", "*released*").0, Channel::Names);
+        assert_eq!(c("Pip", "*released*").0, Channel::Emote);
         assert_eq!(
             c("a reagent crate", "[no longer locked down]").0,
             Channel::Items
@@ -784,6 +821,9 @@ mod tests {
         assert_eq!(c("Aldric Thorne", "Kal Ort Por [Recall]").0, Channel::Spell);
         assert_eq!(c("Bramblewick", "In Vas Mani").0, Channel::Spell);
         assert_eq!(c("Lysa Quill", "*waves*").0, Channel::Emote);
+        assert_eq!(c("Lysa Quill", "hello there *bows*").0, Channel::Emote);
+        assert_eq!(c("System", "*You feel a chill*").0, Channel::Emote);
+        assert_eq!(c("Lysa Quill", "2 * 3 = 6").0, Channel::Speech);
         assert_eq!(c("Lysa Quill", "good hunting").0, Channel::Speech);
         assert_eq!(c("Garrick", "Fine hides, cheap!").0, Channel::Npc);
         assert_eq!(c("Aldric Thorne", "All Follow Me").0, Channel::Combat);

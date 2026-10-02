@@ -20,6 +20,12 @@ use crate::pane::{fmt_count, Pane, PaneAction, PaneCtx, SEARCH_HELP};
 use crate::settings_ui::SettingsUi;
 use crate::theme::{Palette, Rgb};
 
+/// Distinct colours handed to new characters, in order.
+const CHIP_COLORS: [u32; 12] = [
+    0xffd166, 0x2ec4b6, 0xef476f, 0x4cc9f0, 0x06d6a0, 0xf78c6b, 0x9b5de5, 0xf15bb5, 0x8ac926,
+    0xfee440, 0x00bbf9, 0xff924c,
+];
+
 pub struct JournalApp {
     pub settings: Settings,
     pub config_dir: PathBuf,
@@ -179,8 +185,44 @@ impl JournalApp {
         self.mark_dirty();
     }
 
-    pub fn apply_style(&mut self, ctx: &egui::Context) {
-        self.palette = Palette::from_theme(&self.settings.current_theme());
+    /// Give every known character a stored chip (initials + an unused colour).
+    /// Returns true if any chip was added or completed.
+    pub fn ensure_chips(&mut self) -> bool {
+        let mut changed = false;
+        for name in self.store.characters() {
+            if !self.settings.chips.iter().any(|c| c.name == name) {
+                self.settings.chips.push(crate::config::CharacterChip {
+                    label: crate::logview::initials(&name),
+                    name: name.clone(),
+                    ..Default::default()
+                });
+                changed = true;
+            }
+        }
+        for i in 0..self.settings.chips.len() {
+            if self.settings.chips[i].color.is_none() {
+                let used: Vec<Rgb> = self.settings.chips.iter().filter_map(|c| c.color).collect();
+                let pick = CHIP_COLORS
+                    .iter()
+                    .map(|&c| Rgb::hex(c))
+                    .find(|c| !used.contains(c))
+                    .unwrap_or_else(|| {
+                        Rgb::from_color(self.palette.name_color(&self.settings.chips[i].name))
+                    });
+                self.settings.chips[i].color = Some(pick);
+                changed = true;
+            }
+        }
+        if changed {
+            self.refresh_chips();
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    /// Copy chip settings into the palette used for painting.
+    pub fn refresh_chips(&mut self) {
+        self.palette.chips.clear();
         for chip in &self.settings.chips {
             let label: String = chip.label.trim().chars().take(3).collect();
             let label = if label.is_empty() {
@@ -194,6 +236,11 @@ impl JournalApp {
                 .unwrap_or_else(|| self.palette.name_color(&chip.name));
             self.palette.chips.insert(chip.name.clone(), (label, color));
         }
+    }
+
+    pub fn apply_style(&mut self, ctx: &egui::Context) {
+        self.palette = Palette::from_theme(&self.settings.current_theme());
+        self.refresh_chips();
         let visuals = self.palette.visuals();
         ctx.set_visuals_of(egui::Theme::Dark, visuals.clone());
         ctx.set_visuals_of(egui::Theme::Light, visuals);
@@ -326,6 +373,7 @@ impl JournalApp {
         }
         if got {
             self.characters = self.store.characters();
+            self.ensure_chips();
         }
         if self.pending_alert {
             let focused = ctx.input(|i| i.viewport().focused).unwrap_or(true);
@@ -683,9 +731,23 @@ impl JournalApp {
                 }
                 ui.label(RichText::new(parts.join("  ·  ")).color(pal.dim).small());
                 if self.settings.character_tags && self.characters.len() > 1 {
+                    let mut open_chars = false;
                     for ch in self.characters.iter().rev() {
-                        ui.label(RichText::new(ch).color(pal.dim).small());
-                        crate::logview::character_pill(ui, &pal, ch);
+                        let name = ui.add(
+                            egui::Label::new(RichText::new(ch).color(pal.dim).small())
+                                .sense(egui::Sense::click()),
+                        );
+                        let pill = crate::logview::character_pill(ui, &pal, ch);
+                        if name.clicked() || pill.clicked() {
+                            open_chars = true;
+                        }
+                        if name.hovered() || pill.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                    }
+                    if open_chars {
+                        self.settings_ui.open = true;
+                        self.settings_ui.tab = crate::settings_ui::Tab::Characters;
                     }
                 }
             });

@@ -706,7 +706,8 @@ fn channels_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
 fn characters_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
     ui.label(
         "When more than one client is running, each line is tagged with a chip for the character \
-         whose journal it came from. Give each character up to three letters and a colour.",
+         whose journal it came from. New characters get initials and a colour automatically; \
+         change them here (up to three letters).",
     );
     let mut changed = ui
         .checkbox(
@@ -715,13 +716,8 @@ fn characters_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
         )
         .changed();
     ui.add_space(6.0);
-    let mut names: Vec<String> = app.store.characters();
-    for c in &app.settings.chips {
-        if !names.contains(&c.name) {
-            names.push(c.name.clone());
-        }
-    }
-    if names.is_empty() {
+    app.ensure_chips();
+    if app.settings.chips.is_empty() {
         ui.label(
             RichText::new(
                 "No characters seen yet. Log in with journal saving on and they appear here.",
@@ -729,61 +725,50 @@ fn characters_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
             .weak(),
         );
     }
-    let mut remove: Option<String> = None;
+    let seen = app.store.characters();
+    let mut remove: Option<usize> = None;
     egui::Grid::new("chips")
-        .num_columns(5)
-        .spacing([12.0, 6.0])
+        .num_columns(3)
+        .spacing([16.0, 6.0])
         .show(ui, |ui| {
-            ui.label(RichText::new("Chip").strong());
-            ui.label(RichText::new("Character").strong());
-            ui.label(RichText::new("Letters").strong());
-            ui.label(RichText::new("Colour").strong());
-            ui.label("");
+            ui.label(RichText::new("Full Name").strong());
+            ui.label(RichText::new("Initials").strong());
+            ui.label(RichText::new("Color").strong());
             ui.end_row();
-            for name in &names {
-                let idx = match app.settings.chips.iter().position(|c| &c.name == name) {
-                    Some(i) => i,
-                    None => {
-                        app.settings.chips.push(crate::config::CharacterChip {
-                            name: name.clone(),
-                            ..Default::default()
-                        });
-                        app.settings.chips.len() - 1
-                    }
-                };
-                crate::logview::character_pill(ui, &app.palette, name);
-                ui.label(name);
-                let chip = &mut app.settings.chips[idx];
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut chip.label)
-                        .char_limit(3)
-                        .desired_width(44.0)
-                        .hint_text(crate::logview::initials(name)),
-                );
-                changed |= r.changed();
+            for i in 0..app.settings.chips.len() {
+                let name = app.settings.chips[i].name.clone();
                 ui.horizontal(|ui| {
-                    let mut custom = chip.color.is_some();
-                    if ui.checkbox(&mut custom, "custom").changed() {
-                        chip.color = custom.then(|| Rgb::from_color(app.palette.name_color(name)));
-                        changed = true;
-                    }
-                    if let Some(c) = chip.color.as_mut() {
-                        changed |= ui.color_edit_button_srgb(&mut c.0).changed();
+                    crate::logview::character_pill(ui, &app.palette, &name);
+                    ui.label(&name);
+                    if !seen.contains(&name)
+                        && ui
+                            .small_button("forget")
+                            .on_hover_text("not in the loaded journals")
+                            .clicked()
+                    {
+                        remove = Some(i);
                     }
                 });
-                if !app.store.characters().contains(name) && ui.small_button("forget").clicked() {
-                    remove = Some(name.clone());
-                }
+                let chip = &mut app.settings.chips[i];
+                changed |= ui
+                    .add(
+                        egui::TextEdit::singleline(&mut chip.label)
+                            .char_limit(3)
+                            .desired_width(48.0)
+                            .hint_text(crate::logview::initials(&name)),
+                    )
+                    .changed();
+                let color = chip.color.get_or_insert(Rgb::hex(0xffd166));
+                changed |= ui.color_edit_button_srgb(&mut color.0).changed();
                 ui.end_row();
             }
         });
-    if let Some(n) = remove {
-        app.settings.chips.retain(|c| c.name != n);
+    if let Some(i) = remove {
+        app.settings.chips.remove(i);
         changed = true;
     }
     if changed {
-        let ctx = ui.ctx().clone();
-        app.apply_style(&ctx);
+        app.refresh_chips();
         app.mark_dirty();
     }
 }
