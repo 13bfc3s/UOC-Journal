@@ -49,6 +49,8 @@ pub struct JournalApp {
     last_layout_check: Instant,
     pub notice: Option<(String, Instant)>,
     applied_fonts: Option<(Option<PathBuf>, f32)>,
+    /// A user font is loaded into the "journal" font family.
+    journal_font: bool,
     /// Lines with a lower id are hidden ("Clear").
     clear_mark: u32,
     pending_alert: bool,
@@ -109,6 +111,7 @@ impl JournalApp {
             last_layout_check: Instant::now(),
             notice: load_err.map(|e| (e, Instant::now())),
             applied_fonts: None,
+            journal_font: false,
             clear_mark: 0,
             pending_alert: false,
             theme_preview: None,
@@ -316,7 +319,16 @@ impl JournalApp {
         };
         let fonts_key = (font_path.clone(), 0.0);
         if self.applied_fonts.as_ref() != Some(&fonts_key) {
+            // The chosen font only applies to journal text (family "journal");
+            // menus and the settings window keep the default font so lists don't
+            // change size while you browse fonts.
             let mut defs = FontDefinitions::default();
+            let mut journal = defs
+                .families
+                .get(&FontFamily::Proportional)
+                .cloned()
+                .unwrap_or_default();
+            self.journal_font = false;
             if let Some(path) = &font_path {
                 match std::fs::read(path) {
                     Ok(bytes) => {
@@ -324,16 +336,14 @@ impl JournalApp {
                             "user".into(),
                             std::sync::Arc::new(FontData::from_owned(bytes)),
                         );
-                        for fam in [FontFamily::Proportional, FontFamily::Monospace] {
-                            defs.families
-                                .entry(fam)
-                                .or_default()
-                                .insert(0, "user".into());
-                        }
+                        journal.insert(0, "user".into());
+                        self.journal_font = true;
                     }
                     Err(e) => self.notify(format!("Could not load font {}: {e}", path.display())),
                 }
             }
+            defs.families
+                .insert(FontFamily::Name("journal".into()), journal);
             ctx.set_fonts(defs);
             self.applied_fonts = Some(fonts_key);
         }
@@ -989,7 +999,9 @@ impl eframe::App for JournalApp {
             palette: &pal,
             font: FontId::new(
                 self.settings.font_size.clamp(8.0, 40.0),
-                if self.settings.monospace {
+                if self.journal_font {
+                    FontFamily::Name("journal".into())
+                } else if self.settings.monospace {
                     FontFamily::Monospace
                 } else {
                     FontFamily::Proportional

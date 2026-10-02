@@ -236,7 +236,7 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                 .changed();
             ui.end_row();
 
-            ui.label("Font");
+            ui.label("Journal font");
             ui.horizontal(|ui| {
                 let ctx = ui.ctx().clone();
                 let system: Vec<crate::fonts::FontEntry> = app
