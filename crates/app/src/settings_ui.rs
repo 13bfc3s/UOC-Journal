@@ -37,19 +37,35 @@ pub struct SettingsUi {
     font_filter: String,
     /// Browse-added font paths and their display names.
     extra_cache: (Vec<std::path::PathBuf>, Vec<crate::fonts::FontEntry>),
+    /// Hover-preview state from the latest settings-window pass. The journal
+    /// window keeps its own (theme menu), since the two windows draw separately.
+    pub theme_list_shown: bool,
+    pub theme_hovered: Option<String>,
+    pub font_list_shown: bool,
+    pub font_hovered: Option<Option<PathBuf>>,
+}
+
+/// Viewport id of the settings window.
+pub fn viewport_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("uoc-journal-settings")
 }
 
 /// The settings window is its own OS window, so it can be moved anywhere
 /// (outside the journal, onto another monitor). Backends without multi-window
 /// support fall back to an in-app window automatically.
+///
+/// It is a *deferred* viewport: it repaints on its own, independent of the
+/// journal window. On Wayland a window hidden behind other apps gets no frame
+/// callbacks, so it never redraws; an immediate viewport, drawn inside the
+/// journal's pass, froze along with it.
 pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
     // Once created, the settings window is kept alive and only hidden when
     // closed: destroying and recreating native windows (and their GL surfaces)
     // was the fragile path.
-    if !app.settings_ui.open && !app.settings_ui.created {
+    if (!app.settings_ui.open && !app.settings_ui.created) || ctx.embed_viewports() {
         return;
     }
-    let id = egui::ViewportId::from_hash_of("uoc-journal-settings");
+    let id = viewport_id();
     let mut builder = egui::ViewportBuilder::default()
         .with_title("UOC Journal — Settings")
         .with_app_id("uoc-journal-settings")
@@ -58,35 +74,66 @@ pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
     if app.settings.always_on_top {
         builder = builder.with_always_on_top();
     }
+    let shared = app.this.clone();
+    ctx.show_viewport_deferred(id, builder, move |ui, class| {
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        // In the embedded fallback this runs inside the journal's pass, which
+        // already holds the lock; that case is drawn below instead.
+        let Ok(mut app) = shared.try_lock() else {
+            return;
+        };
+        window_pass(&mut app, ui, class);
+    });
+    app.settings_ui.created = true;
+    if app.settings_ui.open && !app.settings_ui.shown {
+        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Focus);
+        app.settings_ui.shown = true;
+        ctx.request_repaint_of(id);
+    } else if !app.settings_ui.open && app.settings_ui.shown {
+        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Visible(false));
+        app.settings_ui.shown = false;
+    }
+}
+
+/// Draw the embedded fallback (no multi-window support) inside the journal.
+pub fn show_embedded(app: &mut JournalApp, ctx: &egui::Context) {
+    if !app.settings_ui.open || !ctx.embed_viewports() {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("Settings")
+        .open(&mut open)
+        .default_size([680.0, 580.0])
+        .show(ctx, |ui| contents(app, ui));
+    if !open {
+        app.settings_ui.open = false;
+    }
+}
+
+/// One pass of the settings window.
+fn window_pass(app: &mut JournalApp, ui: &mut egui::Ui, class: egui::ViewportClass) {
+    if class == egui::ViewportClass::EmbeddedWindow {
+        return;
+    }
+    let vctx = ui.ctx().clone();
     let open = app.settings_ui.open;
-    let reveal = open && !app.settings_ui.shown;
-    let mut close = false;
-    let mut embedded = false;
-    ctx.show_viewport_immediate(id, builder, |ui, class| {
-        if class == egui::ViewportClass::EmbeddedWindow {
-            // No multi-window support: egui draws it inside the main window.
-            embedded = true;
-            if open {
-                contents(app, ui);
-            }
-            return;
-        }
-        let vctx = ui.ctx().clone();
-        let wants_close = vctx.input(|i| {
-            i.viewport().close_requested() || (open && i.key_pressed(egui::Key::Escape))
-        });
-        if wants_close {
-            // Hide instead of letting the window be destroyed.
-            vctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            close = true;
-        }
-        if reveal {
-            vctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            vctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        }
-        if !open {
-            return;
-        }
+    let wants_close = vctx
+        .input(|i| i.viewport().close_requested() || (open && i.key_pressed(egui::Key::Escape)));
+    if wants_close {
+        // Hide instead of letting the window be destroyed.
+        vctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        vctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        app.settings_ui.open = false;
+        app.settings_ui.shown = false;
+    }
+    app.settings_ui.theme_list_shown = false;
+    app.settings_ui.theme_hovered = None;
+    app.settings_ui.font_list_shown = false;
+    app.settings_ui.font_hovered = None;
+    if app.settings_ui.open {
         let fill = app.palette.panel;
         egui::CentralPanel::default()
             .frame(
@@ -95,23 +142,12 @@ pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
                     .inner_margin(egui::Margin::same(10)),
             )
             .show(ui, |ui| contents(app, ui));
-    });
-    if embedded {
-        app.settings_ui.created = false;
-        if close {
-            app.settings_ui.open = false;
-        }
-        return;
     }
-    app.settings_ui.created = true;
-    if close && app.settings_ui.open {
-        app.settings_ui.open = false;
-    }
-    if !app.settings_ui.open && app.settings_ui.shown {
-        ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Visible(false));
-        app.settings_ui.shown = false;
-    } else if app.settings_ui.open {
-        app.settings_ui.shown = true;
+    app.resolve_previews(&vctx);
+    // Changes made here (theme, filters, rules …) show in the journal on its
+    // next pass; ask for one whenever this window handled input.
+    if vctx.input(|i| !i.events.is_empty()) || !app.settings_ui.open {
+        vctx.request_repaint_of(egui::ViewportId::ROOT);
     }
 }
 
@@ -275,11 +311,11 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                 .selected_text(app.settings.theme.clone())
                 .height(420.0)
                 .show_ui(ui, |ui| {
-                    app.theme_list_shown = true;
+                    app.settings_ui.theme_list_shown = true;
                     for t in app.settings.all_themes() {
                         let r = ui.selectable_label(t.name == app.settings.theme, &t.name);
                         if r.hovered() {
-                            app.theme_hovered = Some(t.name.clone());
+                            app.settings_ui.theme_hovered = Some(t.name.clone());
                         }
                         if r.clicked() {
                             app.settings.theme = t.name.clone();
@@ -395,9 +431,9 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
                                 ui.label("Looking for installed fonts…");
                             });
                         }
-                        app.font_list_shown = true;
+                        app.settings_ui.font_list_shown = true;
                         if hovered.is_some() {
-                            app.font_hovered = hovered;
+                            app.settings_ui.font_hovered = hovered;
                         }
                         if let Some(choice) = pick {
                             app.font_preview = None;

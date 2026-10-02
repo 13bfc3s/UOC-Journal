@@ -63,12 +63,13 @@ pub struct JournalApp {
     pub theme_hovered: Option<String>,
     /// Font shown while hovering the font list (`Some(None)` = built-in).
     pub font_preview: Option<Option<PathBuf>>,
-    pub font_list_shown: bool,
-    pub font_hovered: Option<Option<PathBuf>>,
     /// Installed fonts (scanned in the background on first use).
     pub system_fonts: Option<Vec<crate::fonts::FontEntry>>,
     fonts_rx: Option<std::sync::mpsc::Receiver<Vec<crate::fonts::FontEntry>>>,
     characters: Vec<String>,
+    /// Shared handle to this app, for the settings window (a deferred viewport
+    /// that runs outside the journal window's pass). Set by `main`.
+    pub this: std::sync::Weak<std::sync::Mutex<JournalApp>>,
 }
 
 impl JournalApp {
@@ -77,7 +78,9 @@ impl JournalApp {
         let (mut settings, load_err) = config::load(&config_dir);
 
         let ctx = cc.egui_ctx.clone();
-        let watcher = Watcher::spawn(watch_config(&settings), move || ctx.request_repaint());
+        let watcher = Watcher::spawn(watch_config(&settings), move || {
+            ctx.request_repaint_of(egui::ViewportId::ROOT)
+        });
 
         if settings.panes.is_empty() {
             settings.panes = default_panes(&mut settings);
@@ -118,11 +121,10 @@ impl JournalApp {
             clear_mark: 0,
             pending_alert: false,
             theme_preview: None,
+            this: std::sync::Weak::new(),
             theme_list_shown: false,
             theme_hovered: None,
             font_preview: None,
-            font_list_shown: false,
-            font_hovered: None,
             system_fonts: None,
             fonts_rx: None,
             characters: Vec::new(),
@@ -164,6 +166,43 @@ impl JournalApp {
         self.watcher.send(Command::LoadAll);
     }
 
+    /// Live theme/font preview: hovering an entry shows it; leaving the list
+    /// without clicking (menu or dropdown closes) goes back to the saved choice.
+    /// Called at the end of both the journal and the settings window passes.
+    pub fn resolve_previews(&mut self, ctx: &egui::Context) {
+        let s = &self.settings_ui;
+        let want = if !(self.theme_list_shown || s.theme_list_shown) {
+            None
+        } else if let Some(h) = self
+            .theme_hovered
+            .clone()
+            .or_else(|| s.theme_hovered.clone())
+        {
+            Some(h)
+        } else {
+            self.theme_preview.clone()
+        };
+        let want_font = if !s.font_list_shown {
+            None
+        } else if s.font_hovered.is_some() {
+            s.font_hovered.clone()
+        } else {
+            self.font_preview.clone()
+        };
+        if want_font != self.font_preview || want != self.theme_preview {
+            self.font_preview = want_font;
+            self.theme_preview = want;
+            self.apply_style(ctx);
+            self.repaint_all(ctx);
+        }
+    }
+
+    /// Repaint the journal and the settings window.
+    pub fn repaint_all(&self, ctx: &egui::Context) {
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+        ctx.request_repaint_of(crate::settings_ui::viewport_id());
+    }
+
     pub fn mark_dirty(&mut self) {
         self.settings_dirty = true;
         self.settings_changed_at = Instant::now();
@@ -201,7 +240,8 @@ impl JournalApp {
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let _ = tx.send(watcher::detect_journal_dirs());
-            ctx.request_repaint();
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+            ctx.request_repaint_of(crate::settings_ui::viewport_id());
         });
         self.detecting = Some(rx);
         self.detected = None;
@@ -264,7 +304,7 @@ impl JournalApp {
             let ctx = ctx.clone();
             std::thread::spawn(move || {
                 let _ = tx.send(crate::fonts::scan_system_fonts());
-                ctx.request_repaint();
+                ctx.request_repaint_of(crate::settings_ui::viewport_id());
             });
             self.fonts_rx = Some(rx);
         }
@@ -1006,8 +1046,6 @@ impl eframe::App for JournalApp {
         self.pump(&ctx);
         self.theme_list_shown = false;
         self.theme_hovered = None;
-        self.font_list_shown = false;
-        self.font_hovered = None;
         self.shortcuts(&ctx);
 
         let pal = self.palette.clone();
@@ -1116,32 +1154,8 @@ impl eframe::App for JournalApp {
         self.help_window(&ctx);
         crate::settings_ui::show(self, &ctx);
 
-        // Live theme preview: hovering a theme shows it; leaving the list without
-        // clicking (menu or dropdown closes) goes back to the saved theme.
-        let want = if !self.theme_list_shown {
-            None
-        } else if self.theme_hovered.is_some() {
-            self.theme_hovered.clone()
-        } else {
-            self.theme_preview.clone()
-        };
-        let want_font = if !self.font_list_shown {
-            None
-        } else if self.font_hovered.is_some() {
-            self.font_hovered.clone()
-        } else {
-            self.font_preview.clone()
-        };
-        if want_font != self.font_preview {
-            self.font_preview = want_font;
-            self.apply_style(&ctx);
-            ctx.request_repaint();
-        }
-        if want != self.theme_preview {
-            self.theme_preview = want;
-            self.apply_style(&ctx);
-            ctx.request_repaint();
-        }
+        crate::settings_ui::show_embedded(self, &ctx);
+        self.resolve_previews(&ctx);
 
         // Persist.
         if self.settings_dirty && self.settings_changed_at.elapsed() > Duration::from_millis(1200) {

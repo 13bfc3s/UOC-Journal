@@ -45,6 +45,20 @@ fn icon() -> egui::IconData {
     }
 }
 
+/// The app lives behind a mutex so the settings window, a deferred viewport
+/// painted outside the journal window's pass, can reach it too.
+struct Shell(std::sync::Arc<std::sync::Mutex<app::JournalApp>>);
+
+fn lock(app: &std::sync::Mutex<app::JournalApp>) -> std::sync::MutexGuard<'_, app::JournalApp> {
+    app.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl eframe::App for Shell {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        eframe::App::ui(&mut *lock(&self.0), ui, frame);
+    }
+}
+
 /// Set in the child process started by [`supervise`].
 const CHILD_ENV: &str = "UOC_JOURNAL_CHILD";
 
@@ -195,6 +209,10 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "UOC Journal",
         options,
-        Box::new(|cc| Ok(Box::new(app::JournalApp::new(cc)))),
+        Box::new(|cc| {
+            let app = std::sync::Arc::new(std::sync::Mutex::new(app::JournalApp::new(cc)));
+            lock(&app).this = std::sync::Arc::downgrade(&app);
+            Ok(Box::new(Shell(app)))
+        }),
     )
 }
