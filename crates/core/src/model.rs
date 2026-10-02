@@ -270,7 +270,7 @@ pub mod flags {
     pub const INCOMING: u8 = 1 << 4;
 }
 
-/// One journal line. Text lives in the [`crate::Store`] arenas; this is 20 bytes.
+/// One journal line. Text lives in the [`crate::Store`] arenas; this is 24 bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
     /// Byte offset of the message text in the store's text arena.
@@ -285,9 +285,19 @@ pub struct Entry {
     pub session: u16,
     pub channel: Channel,
     pub flags: u8,
+    /// Second within the minute when the line arrived live, or [`SECS_UNKNOWN`]
+    /// (journal files only record minutes).
+    pub secs: u8,
 }
 
+/// `Entry::secs` value for lines whose seconds are not known.
+pub const SECS_UNKNOWN: u8 = 255;
+
 impl Entry {
+    pub fn seconds(&self) -> Option<u8> {
+        (self.secs < 60).then_some(self.secs)
+    }
+
     #[inline]
     pub fn has(&self, flag: u8) -> bool {
         self.flags & flag != 0
@@ -315,6 +325,6 @@ mod tests {
         s.toggle(Channel::Alliance);
         assert_eq!(s.len(), 3);
         assert!(ChannelSet::ALL.is_all());
-        assert_eq!(std::mem::size_of::<Entry>(), 20);
+        assert_eq!(std::mem::size_of::<Entry>(), 24);
     }
 }

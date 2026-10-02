@@ -273,6 +273,12 @@ impl Pipeline {
             session,
             channel,
             flags: entry_flags,
+            // Live lines get the second they arrived; history has minutes only.
+            secs: if self.live_dedup {
+                now_second()
+            } else {
+                crate::model::SECS_UNKNOWN
+            },
         });
         let id = self.next_id;
         self.next_id += 1;
@@ -565,6 +571,14 @@ impl Pipeline {
         let rules = std::mem::take(&mut self.rules);
         *self = Pipeline::new(rules);
     }
+}
+
+/// Seconds part of the current time (same in every timezone).
+fn now_second() -> u8 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| (d.as_secs() % 60) as u8)
+        .unwrap_or(crate::model::SECS_UNKNOWN)
 }
 
 /// Word-ish containment: `needle` must not be glued to letters on either side.

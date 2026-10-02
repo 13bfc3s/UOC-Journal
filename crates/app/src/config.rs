@@ -26,7 +26,42 @@ pub enum TimeFormat {
     #[default]
     Time,
     DateTime,
+    /// `YYYY-MM-DD HH:MM:SS`
+    FullSeconds,
+    /// The user's own pattern (`Settings::time_custom`).
+    Custom,
     Hidden,
+}
+
+impl TimeFormat {
+    pub const ALL: [TimeFormat; 5] = [
+        TimeFormat::Time,
+        TimeFormat::DateTime,
+        TimeFormat::FullSeconds,
+        TimeFormat::Custom,
+        TimeFormat::Hidden,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TimeFormat::Time => "HH:MM",
+            TimeFormat::DateTime => "MM-DD HH:MM",
+            TimeFormat::FullSeconds => "YYYY-MM-DD HH:MM:SS",
+            TimeFormat::Custom => "Custom…",
+            TimeFormat::Hidden => "Hidden",
+        }
+    }
+
+    /// strftime-style pattern for this choice; `None` hides the column.
+    pub fn pattern(self, custom: &str) -> Option<String> {
+        match self {
+            TimeFormat::Time => Some("%H:%M".into()),
+            TimeFormat::DateTime => Some("%m-%d %H:%M".into()),
+            TimeFormat::FullSeconds => Some("%Y-%m-%d %H:%M:%S".into()),
+            TimeFormat::Custom => Some(custom.to_string()).filter(|c| !c.is_empty()),
+            TimeFormat::Hidden => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -238,6 +273,8 @@ pub struct Settings {
     /// Font files added with Browse…, listed alongside installed fonts.
     pub extra_fonts: Vec<PathBuf>,
     pub time_format: TimeFormat,
+    /// Pattern used when `time_format` is Custom (see `uoj_core::time::format`).
+    pub time_custom: String,
     pub show_badges: bool,
     pub color_names: bool,
     /// Prefix lines with the character name when more than one client is logged.
@@ -265,6 +302,7 @@ impl Default for Settings {
             font_path: None,
             extra_fonts: Vec::new(),
             time_format: TimeFormat::Time,
+            time_custom: "%a %l:%M:%S %p".into(),
             show_badges: false,
             color_names: true,
             character_tags: true,

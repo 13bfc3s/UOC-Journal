@@ -574,19 +574,18 @@ impl JournalApp {
                 ui.separator();
                 let mut changed = false;
                 ui.label(RichText::new("Time column").small().weak());
-                changed |= ui
-                    .radio_value(&mut self.settings.time_format, TimeFormat::Time, "HH:MM")
-                    .changed();
-                changed |= ui
-                    .radio_value(
-                        &mut self.settings.time_format,
-                        TimeFormat::DateTime,
-                        "MM-DD HH:MM",
-                    )
-                    .changed();
-                changed |= ui
-                    .radio_value(&mut self.settings.time_format, TimeFormat::Hidden, "Hidden")
-                    .changed();
+                for f in TimeFormat::ALL {
+                    changed |= ui
+                        .radio_value(&mut self.settings.time_format, f, f.label())
+                        .changed();
+                }
+                if self.settings.time_format == TimeFormat::Custom
+                    && ui.small_button("Edit custom format…").clicked()
+                {
+                    ui.close();
+                    self.settings_ui.open = true;
+                    self.settings_ui.tab = crate::settings_ui::Tab::Appearance;
+                }
                 ui.separator();
                 changed |= ui
                     .checkbox(&mut self.settings.show_badges, "Channel badges")
@@ -1007,7 +1006,10 @@ impl eframe::App for JournalApp {
                     FontFamily::Proportional
                 },
             ),
-            time_format: self.settings.time_format,
+            time_pattern: self
+                .settings
+                .time_format
+                .pattern(&self.settings.time_custom),
             badges: self.settings.show_badges,
             color_names: self.settings.color_names,
             character_tags: self.settings.character_tags && self.characters.len() > 1,

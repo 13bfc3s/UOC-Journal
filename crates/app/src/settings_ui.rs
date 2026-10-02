@@ -376,20 +376,53 @@ fn appearance_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
             ui.end_row();
 
             ui.label("Time column");
-            ui.horizontal(|ui| {
-                dirty |= ui
-                    .radio_value(&mut app.settings.time_format, TimeFormat::Time, "HH:MM")
-                    .changed();
-                dirty |= ui
-                    .radio_value(
-                        &mut app.settings.time_format,
-                        TimeFormat::DateTime,
-                        "MM-DD HH:MM",
+            ui.vertical(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for f in TimeFormat::ALL {
+                        dirty |= ui
+                            .radio_value(&mut app.settings.time_format, f, f.label())
+                            .changed();
+                    }
+                });
+                if app.settings.time_format == TimeFormat::Custom {
+                    ui.horizontal(|ui| {
+                        dirty |= ui
+                            .add(
+                                egui::TextEdit::singleline(&mut app.settings.time_custom)
+                                    .desired_width(220.0)
+                                    .hint_text("%Y-%m-%d %H:%M:%S"),
+                            )
+                            .changed();
+                        let now = app.store.entries().last().map(|e| (e.time, e.seconds()));
+                        let (t, secs) = now.unwrap_or((
+                            uoj_core::time::minutes(2026, 3, 14, 18, 5).unwrap_or(0),
+                            Some(9),
+                        ));
+                        ui.label(RichText::new("preview:").weak());
+                        ui.label(
+                            RichText::new(uoj_core::time::format(t, secs, &app.settings.time_custom))
+                                .color(app.palette.accent)
+                                .monospace(),
+                        );
+                    });
+                    ui.label(
+                        RichText::new(
+                            "%Y year  %y 2-digit year  %m month  %d day  %e day (no zero)  \
+                             %b/%B month name  %a/%A weekday\n%H hour  %I 12-hour  %l 12-hour (no zero)  \
+                             %M minute  %S second  %p AM/PM  %P am/pm  %F date  %T time  %R HH:MM  %% percent",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+                ui.label(
+                    RichText::new(
+                        "Journal files only record minutes; seconds are known for lines that arrive \
+                         while UOC Journal is running (older lines show --).",
                     )
-                    .changed();
-                dirty |= ui
-                    .radio_value(&mut app.settings.time_format, TimeFormat::Hidden, "Hidden")
-                    .changed();
+                    .small()
+                    .weak(),
+                );
             });
             ui.end_row();
 

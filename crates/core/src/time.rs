@@ -83,6 +83,95 @@ pub fn md_hm(t: u32) -> String {
     format!("{:02}-{:02} {:02}:{:02}", p.month, p.day, p.hour, p.minute)
 }
 
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+const WEEKDAYS: [&str; 7] = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
+
+/// strftime-style formatting of a minute timestamp plus optional seconds.
+///
+/// `%Y` year, `%y` 2-digit year, `%m` month, `%d` day, `%e` day without zero,
+/// `%H` 24h hour, `%I` 12h hour, `%l` 12h hour without zero, `%M` minute,
+/// `%S` second (`--` when unknown), `%p` AM/PM, `%P` am/pm, `%b`/`%B` month
+/// name, `%a`/`%A` weekday name, `%j` day of year, `%F` = `%Y-%m-%d`,
+/// `%T` = `%H:%M:%S`, `%R` = `%H:%M`, `%%` a percent sign.
+pub fn format(t: u32, secs: Option<u8>, fmt: &str) -> String {
+    let p = parts(t);
+    let days = (t / 1440) as i64;
+    let weekday = ((days + 4).rem_euclid(7)) as usize; // 1970-01-01 was a Thursday
+    let h12 = match p.hour % 12 {
+        0 => 12,
+        h => h,
+    };
+    let sec = |out: &mut String| match secs {
+        Some(s) => out.push_str(&format!("{s:02}")),
+        None => out.push_str("--"),
+    };
+    let mut out = String::with_capacity(fmt.len() + 8);
+    let mut chars = fmt.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('Y') => out.push_str(&format!("{:04}", p.year)),
+            Some('y') => out.push_str(&format!("{:02}", p.year.rem_euclid(100))),
+            Some('m') => out.push_str(&format!("{:02}", p.month)),
+            Some('d') => out.push_str(&format!("{:02}", p.day)),
+            Some('e') => out.push_str(&p.day.to_string()),
+            Some('H') => out.push_str(&format!("{:02}", p.hour)),
+            Some('k') => out.push_str(&p.hour.to_string()),
+            Some('I') => out.push_str(&format!("{h12:02}")),
+            Some('l') => out.push_str(&h12.to_string()),
+            Some('M') => out.push_str(&format!("{:02}", p.minute)),
+            Some('S') => sec(&mut out),
+            Some('p') => out.push_str(if p.hour < 12 { "AM" } else { "PM" }),
+            Some('P') => out.push_str(if p.hour < 12 { "am" } else { "pm" }),
+            Some('b') => out.push_str(&MONTHS[(p.month - 1) as usize][..3]),
+            Some('B') => out.push_str(MONTHS[(p.month - 1) as usize]),
+            Some('a') => out.push_str(&WEEKDAYS[weekday][..3]),
+            Some('A') => out.push_str(WEEKDAYS[weekday]),
+            Some('j') => {
+                let doy = days - days_from_civil(p.year, 1, 1) + 1;
+                out.push_str(&format!("{doy:03}"));
+            }
+            Some('F') => out.push_str(&format!("{:04}-{:02}-{:02}", p.year, p.month, p.day)),
+            Some('R') => out.push_str(&format!("{:02}:{:02}", p.hour, p.minute)),
+            Some('T') => {
+                out.push_str(&format!("{:02}:{:02}:", p.hour, p.minute));
+                sec(&mut out);
+            }
+            Some('%') => out.push('%'),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+            }
+            None => out.push('%'),
+        }
+    }
+    out
+}
+
 /// Current local time is not knowable without a tz database; callers that need
 /// "now" use the newest journal timestamp instead. This returns UTC minutes and is
 /// only used for coarse file-age decisions.
@@ -109,5 +198,17 @@ mod tests {
         assert_eq!(hm(t), "19:37");
         assert_eq!(md_hm(t), "09-30 19:37");
         assert!(minutes(2026, 13, 1, 0, 0).is_none());
+        assert_eq!(
+            format(t, Some(7), "%Y-%m-%d %H:%M:%S"),
+            "2026-09-30 19:37:07"
+        );
+        assert_eq!(format(t, None, "%T"), "19:37:--");
+        assert_eq!(format(t, None, "%a %e %b, %l:%M %p"), "Wed 30 Sep, 7:37 PM");
+        assert_eq!(
+            format(t, None, "%A %B %j %y %% %q"),
+            "Wednesday September 273 26 % %q"
+        );
+        let midnight = minutes(2026, 1, 1, 0, 5).unwrap();
+        assert_eq!(format(midnight, None, "%I:%M %P"), "12:05 am");
     }
 }

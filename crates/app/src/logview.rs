@@ -17,7 +17,7 @@ use regex::Regex;
 use uoj_core::classify::combat_number;
 use uoj_core::{flags, time, Channel, ChannelSet, Entry, Query, Store};
 
-use crate::config::{HighlightRule, TimeFormat};
+use crate::config::HighlightRule;
 use crate::theme::{blend, Palette};
 
 /// A highlight rule ready for matching.
@@ -64,7 +64,8 @@ impl Highlight {
 pub struct RowStyle<'a> {
     pub palette: &'a Palette,
     pub font: FontId,
-    pub time_format: TimeFormat,
+    /// strftime-style time column pattern; `None` hides the column.
+    pub time_pattern: Option<String>,
     pub badges: bool,
     pub color_names: bool,
     /// Prefix rows with the character name.
@@ -157,12 +158,20 @@ pub enum LogAction {
 }
 
 /// Render one entry as `[HH:MM] speaker: text` for the clipboard.
+/// Full timestamp, with seconds when they are known.
+pub fn full_stamp(e: &Entry) -> String {
+    match e.seconds() {
+        Some(s) => time::format(e.time, Some(s), "%Y-%m-%d %H:%M:%S"),
+        None => time::ymd_hm(e.time),
+    }
+}
+
 pub fn plain_line(store: &Store, e: &Entry) -> String {
     let speaker = store.speaker(e);
     if speaker.is_empty() {
-        format!("[{}] {}", time::ymd_hm(e.time), store.text(e))
+        format!("[{}] {}", full_stamp(e), store.text(e))
     } else {
-        format!("[{}] {}: {}", time::ymd_hm(e.time), speaker, store.text(e))
+        format!("[{}] {}: {}", full_stamp(e), speaker, store.text(e))
     }
 }
 
@@ -186,15 +195,20 @@ const SCROLLBAR_W: f32 = 10.0;
 const LEFT_PAD: f32 = 6.0;
 
 impl LogView<'_> {
-    fn gutter_width(&self, ui: &egui::Ui) -> f32 {
-        let sample = match self.style.time_format {
-            TimeFormat::Time => "00:00",
-            TimeFormat::DateTime => "00-00 00:00",
-            TimeFormat::Hidden => "",
+    /// Width of the widest time stamp the pattern can produce.
+    fn time_width(&self, ui: &egui::Ui) -> f32 {
+        let Some(pat) = &self.style.time_pattern else {
+            return 0.0;
         };
+        // A late, long date: September, Wednesday, 23:58:58.
+        let sample = time::minutes(2026, 9, 30, 23, 58).unwrap_or(0);
+        text_width(ui, &time::format(sample, Some(58), pat), &self.style.font)
+    }
+
+    fn gutter_width(&self, ui: &egui::Ui) -> f32 {
         let mut w = 0.0;
-        if !sample.is_empty() {
-            w += text_width(ui, sample, &self.style.font) + 8.0;
+        if self.style.time_pattern.is_some() {
+            w += self.time_width(ui) + 8.0;
         }
         if self.style.badges {
             let badge_font = FontId::new(self.style.font.size * 0.72, FontFamily::Monospace);
@@ -582,6 +596,7 @@ impl LogView<'_> {
         let clip = painter.with_clip_rect(content);
         let sel = state.selection();
         let badge_font = FontId::new(self.style.font.size * 0.72, FontFamily::Monospace);
+        let time_w = self.time_width(ui);
         for (y, l) in &laid {
             let e = self.store.entry(l.id);
             let row_rect = Rect::from_min_size(
@@ -637,28 +652,15 @@ impl LogView<'_> {
             }
             let mut x = content.left() + LEFT_PAD;
             let ty = *y + ROW_PAD;
-            match self.style.time_format {
-                TimeFormat::Time => {
-                    clip.text(
-                        Pos2::new(x, ty),
-                        Align2::LEFT_TOP,
-                        time::hm(e.time),
-                        self.style.font.clone(),
-                        pal.dim,
-                    );
-                    x += text_width(ui, "00:00", &self.style.font) + 8.0;
-                }
-                TimeFormat::DateTime => {
-                    clip.text(
-                        Pos2::new(x, ty),
-                        Align2::LEFT_TOP,
-                        time::md_hm(e.time),
-                        self.style.font.clone(),
-                        pal.dim,
-                    );
-                    x += text_width(ui, "00-00 00:00", &self.style.font) + 8.0;
-                }
-                TimeFormat::Hidden => {}
+            if let Some(pat) = &self.style.time_pattern {
+                clip.text(
+                    Pos2::new(x, ty),
+                    Align2::LEFT_TOP,
+                    time::format(e.time, e.seconds(), pat),
+                    self.style.font.clone(),
+                    pal.dim,
+                );
+                x += time_w + 8.0;
             }
             if self.style.badges {
                 let c = pal.channel(e.channel);
@@ -716,7 +718,7 @@ impl LogView<'_> {
                 let file = sess.map(|s| s.file_name.clone()).unwrap_or_default();
                 let tip = format!(
                     "{}\n{} · {}\n{}",
-                    time::ymd_hm(e.time),
+                    full_stamp(e),
                     who,
                     e.channel.label(),
                     file
