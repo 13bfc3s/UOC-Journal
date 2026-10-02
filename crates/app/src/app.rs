@@ -47,6 +47,8 @@ pub struct JournalApp {
     settings_changed_at: Instant,
     last_layout: String,
     last_layout_check: Instant,
+    /// Start of the previous frame, for the frame-rate cap (vsync is off).
+    last_frame: Instant,
     pub notice: Option<(String, Instant)>,
     applied_fonts: Option<(Option<PathBuf>, f32)>,
     /// A user font is loaded into the "journal" font family.
@@ -109,6 +111,7 @@ impl JournalApp {
             settings_dirty: false,
             settings_changed_at: Instant::now(),
             last_layout_check: Instant::now(),
+            last_frame: Instant::now(),
             notice: load_err.map(|e| (e, Instant::now())),
             applied_fonts: None,
             journal_font: false,
@@ -993,6 +996,12 @@ impl JournalApp {
 
 impl eframe::App for JournalApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // vsync is off (see main.rs), so cap continuous repaints at ~120 fps.
+        let min_frame = Duration::from_micros(8_300);
+        if let Some(wait) = min_frame.checked_sub(self.last_frame.elapsed()) {
+            std::thread::sleep(wait);
+        }
+        self.last_frame = Instant::now();
         let ctx = ui.ctx().clone();
         self.pump(&ctx);
         self.theme_list_shown = false;

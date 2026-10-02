@@ -137,7 +137,7 @@ fn supervise() -> Option<i32> {
                 6 => "SIGABRT, aborted",
                 7 => "SIGBUS, bus error",
                 8 => "SIGFPE, arithmetic error",
-                9 => "SIGKILL, killed (possibly out of memory)",
+                9 => "SIGKILL: force-quit by the desktop because the window stopped responding, or out of memory",
                 11 => "SIGSEGV, segmentation fault",
                 // Normal ways of being asked to quit (logout, Ctrl+C, kill).
                 1 | 2 | 15 => "",
@@ -180,6 +180,16 @@ fn main() -> eframe::Result {
             .with_min_inner_size([420.0, 280.0])
             .with_icon(icon()),
         persist_window: true,
+        // With vsync on, a buffer swap on Wayland waits for the compositor's
+        // frame callback, and compositors stop sending those to windows that
+        // are hidden behind others. The Settings window is drawn on the same
+        // thread, so it froze too until the desktop offered to force-quit
+        // (SIGKILL). The app only repaints when something changes, so it
+        // doesn't need vsync.
+        glow_options: eframe::egui_glow::GlowConfiguration {
+            vsync: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
     eframe::run_native(

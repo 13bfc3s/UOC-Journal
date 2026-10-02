@@ -117,12 +117,26 @@ pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
 
 fn contents(app: &mut JournalApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
+        // Unselected buttons normally have no frame, and egui counts the frame's
+        // outline in a button's size, so hovering one widened it and nudged its
+        // neighbours. An invisible outline keeps every state the same size.
+        let w = &mut ui.visuals_mut().widgets.inactive;
+        w.bg_fill = egui::Color32::TRANSPARENT;
+        w.weak_bg_fill = egui::Color32::TRANSPARENT;
+        w.bg_stroke = egui::Stroke::new(1.0, egui::Color32::TRANSPARENT);
         let t = &mut app.settings_ui.tab;
-        ui.selectable_value(t, Tab::Journal, "Journal");
-        ui.selectable_value(t, Tab::Appearance, "Appearance");
-        ui.selectable_value(t, Tab::Characters, "Characters");
-        ui.selectable_value(t, Tab::Channels, "Channels & rules");
-        ui.selectable_value(t, Tab::Highlights, "Highlights & alerts");
+        for (tab, label) in [
+            (Tab::Journal, "Journal"),
+            (Tab::Appearance, "Appearance"),
+            (Tab::Characters, "Characters"),
+            (Tab::Channels, "Channels & rules"),
+            (Tab::Highlights, "Highlights & alerts"),
+        ] {
+            let b = egui::Button::selectable(*t == tab, label).frame_when_inactive(true);
+            if ui.add(b).clicked() {
+                *t = tab;
+            }
+        }
     });
     ui.separator();
     egui::ScrollArea::vertical()
