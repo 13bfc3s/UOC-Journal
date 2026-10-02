@@ -35,39 +35,71 @@ pub struct SettingsUi {
     extra_cache: (Vec<std::path::PathBuf>, Vec<crate::fonts::FontEntry>),
 }
 
+/// The settings window is its own OS window, so it can be moved anywhere
+/// (outside the journal, onto another monitor). Backends without multi-window
+/// support fall back to an in-app window automatically.
 pub fn show(app: &mut JournalApp, ctx: &egui::Context) {
     if !app.settings_ui.open {
         return;
     }
-    let mut open = true;
-    egui::Window::new("Settings")
-        .open(&mut open)
-        .default_width(620.0)
-        .default_height(520.0)
-        .resizable(true)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let t = &mut app.settings_ui.tab;
-                ui.selectable_value(t, Tab::Journal, "Journal");
-                ui.selectable_value(t, Tab::Appearance, "Appearance");
-                ui.selectable_value(t, Tab::Characters, "Characters");
-                ui.selectable_value(t, Tab::Channels, "Channels & rules");
-                ui.selectable_value(t, Tab::Highlights, "Highlights & alerts");
-            });
-            ui.separator();
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| match app.settings_ui.tab {
-                    Tab::Journal => journal_tab(app, ui),
-                    Tab::Appearance => appearance_tab(app, ui),
-                    Tab::Characters => characters_tab(app, ui),
-                    Tab::Channels => channels_tab(app, ui),
-                    Tab::Highlights => highlights_tab(app, ui),
-                });
-        });
-    if !open {
+    let mut builder = egui::ViewportBuilder::default()
+        .with_title("UOC Journal — Settings")
+        .with_app_id("uoc-journal-settings")
+        .with_inner_size([680.0, 580.0])
+        .with_min_inner_size([360.0, 240.0]);
+    if app.settings.always_on_top {
+        builder = builder.with_always_on_top();
+    }
+    let mut close = false;
+    ctx.show_viewport_immediate(
+        egui::ViewportId::from_hash_of("uoc-journal-settings"),
+        builder,
+        |ui, class| {
+            if class == egui::ViewportClass::EmbeddedWindow {
+                // Rendered inside the main window by egui; it handles closing.
+                contents(app, ui);
+                return;
+            }
+            let fill = app.palette.panel;
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::new()
+                        .fill(fill)
+                        .inner_margin(egui::Margin::same(10)),
+                )
+                .show(ui, |ui| contents(app, ui));
+            if ui
+                .ctx()
+                .input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape))
+            {
+                close = true;
+            }
+        },
+    );
+    if close {
         app.settings_ui.open = false;
     }
+}
+
+fn contents(app: &mut JournalApp, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        let t = &mut app.settings_ui.tab;
+        ui.selectable_value(t, Tab::Journal, "Journal");
+        ui.selectable_value(t, Tab::Appearance, "Appearance");
+        ui.selectable_value(t, Tab::Characters, "Characters");
+        ui.selectable_value(t, Tab::Channels, "Channels & rules");
+        ui.selectable_value(t, Tab::Highlights, "Highlights & alerts");
+    });
+    ui.separator();
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| match app.settings_ui.tab {
+            Tab::Journal => journal_tab(app, ui),
+            Tab::Appearance => appearance_tab(app, ui),
+            Tab::Characters => characters_tab(app, ui),
+            Tab::Channels => channels_tab(app, ui),
+            Tab::Highlights => highlights_tab(app, ui),
+        });
 }
 
 fn journal_tab(app: &mut JournalApp, ui: &mut egui::Ui) {
