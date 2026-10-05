@@ -81,7 +81,19 @@ cd uoc-journal-*-linux-x86_64
 
 Or just run `./uoc-journal` from the extracted folder.
 
-### From source
+### From source (one command)
+
+`install.sh` installs the system libraries the app needs (apt, dnf, pacman or
+zypper; asks for sudo), installs Rust with rustup if needed, builds the app and
+installs it to `~/.local/bin` with a menu entry. Run it again to update.
+
+```sh
+git clone https://github.com/13bfc3s/UOC-Journal.git
+cd UOC-Journal
+./install.sh
+```
+
+### From source (manual)
 
 ```sh
 # Rust: https://rustup.rs
