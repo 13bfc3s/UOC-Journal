@@ -60,13 +60,34 @@ install_packages() {
     done
 }
 
+# The dependencies need Rust 1.95 or newer; distro packages are often older.
+RUST_MINOR=95
+rust_ok() {
+    v="$($CARGO --version 2>/dev/null | sed -n 's/^cargo 1\.\([0-9]*\).*/\1/p')"
+    [ -n "$v" ] && [ "$v" -ge "$RUST_MINOR" ]
+}
+
+# Sets CARGO to a cargo command that is new enough.
 install_rust() {
-    [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
-    if ! command -v cargo >/dev/null 2>&1; then
+    if [ -f "$HOME/.cargo/env" ]; then . "$HOME/.cargo/env"; fi
+    CARGO="cargo"
+    rust_ok && return 0
+    if command -v rustup >/dev/null 2>&1; then
+        say "Updating Rust (rustup)"
+        rustup toolchain install stable --profile minimal
+        CARGO="cargo +stable"
+    else
         say "Installing Rust (rustup)"
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+        tmp="$(mktemp)"
+        url="https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
+        curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp" "$url" || die "could not download $url"
+        chmod +x "$tmp"
+        "$tmp" -y --profile minimal
+        rm -f "$tmp"
         . "$HOME/.cargo/env"
+        CARGO="cargo +stable"
     fi
+    rust_ok || die "Rust 1.$RUST_MINOR or newer is needed (found: $($CARGO --version 2>&1))"
 }
 
 # Sets SRC to the checkout to build.
@@ -92,7 +113,7 @@ get_source() {
 
 build_and_install() {
     say "Building (the first build takes a few minutes)"
-    cargo build --release --locked -p uoc-journal --manifest-path "$SRC/Cargo.toml"
+    $CARGO build --release --locked -p uoc-journal --manifest-path "$SRC/Cargo.toml"
 
     say "Installing"
     mkdir -p "$BIN" "$DATA/applications" "$DATA/icons/hicolor/64x64/apps"

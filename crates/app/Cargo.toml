@@ -3,6 +3,7 @@ name = "uoc-journal"
 description = "A fast, searchable, themeable journal viewer for ClassicUO / Ultima Online Outlands on Linux"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 
 [[bin]]
