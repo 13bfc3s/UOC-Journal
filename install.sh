@@ -78,12 +78,13 @@ install_rust() {
         CARGO="cargo +stable"
     else
         say "Installing Rust (rustup)"
-        tmp="$(mktemp)"
+        # rustup-init picks its mode from its file name, so keep that name.
+        tmp="$(mktemp -d)"
         url="https://static.rust-lang.org/rustup/dist/$(uname -m)-unknown-linux-gnu/rustup-init"
-        curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp" "$url" || die "could not download $url"
-        chmod +x "$tmp"
-        "$tmp" -y --profile minimal
-        rm -f "$tmp"
+        curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/rustup-init" "$url" || die "could not download $url"
+        chmod +x "$tmp/rustup-init"
+        "$tmp/rustup-init" -y --profile minimal
+        rm -rf "$tmp"
         . "$HOME/.cargo/env"
         CARGO="cargo +stable"
     fi
